@@ -70,6 +70,8 @@ class TrOCRAdapter(BaseOCRAdapter):
         
         print(f"Loading trOCR model ({self.MODEL_NAME}) on {self.device}...")
         
+        from transformers import ViTImageProcessor
+        
         # Load tokenizer
         self._tokenizer = AutoTokenizer.from_pretrained(self.MODEL_NAME)
         
@@ -79,8 +81,11 @@ class TrOCRAdapter(BaseOCRAdapter):
             device_map="auto" if self.device == "cuda" else None
         )
         
-        # Load processor
-        self._processor = TrOCRProcessor.from_pretrained(self.MODEL_NAME)
+        # Load image processor (ViTFeatureExtractor is deprecated, use ViTImageProcessor)
+        image_processor = ViTImageProcessor.from_pretrained(self.MODEL_NAME)
+        
+        # Load processor with explicit image processor to handle deprecated type
+        self._processor = TrOCRProcessor(image_processor=image_processor, tokenizer=self._tokenizer)
         
         # Move model to device if not already handled by device_map
         if self.device == "cpu" and not hasattr(self._model, "device"):

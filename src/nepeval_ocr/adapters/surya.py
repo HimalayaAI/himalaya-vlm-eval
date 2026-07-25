@@ -17,6 +17,7 @@ from PIL.Image import Image
 from .base import BaseOCRAdapter
 
 try:
+    import surya
     from surya.inference import SuryaInferenceManager
     from surya.recognition import RecognitionPredictor
     SURYA_AVAILABLE = True
@@ -52,8 +53,23 @@ class SuryaAdapter(BaseOCRAdapter):
         self._predictor = None
         self._manager = None
         
-        # Allow overriding inference URL via environment
-        self.inference_url = os.environ.get("SURYA_INFERENCE_URL")
+        # Pre-validate backend availability by trying to create manager
+        try:
+            # Set llamacpp backend for CPU inference
+            import surya.settings
+            if not surya.settings.settings.SURYA_INFERENCE_BACKEND:
+                surya.settings.settings.SURYA_INFERENCE_BACKEND = "llamacpp"
+            
+            # Try to create a manager to validate backend is available
+            from surya.inference import SuryaInferenceManager
+            test_manager = SuryaInferenceManager()
+        except Exception as e:
+            raise RuntimeError(
+                f"Surya backend initialization failed: {e}. "
+                "For CPU inference, install llama.cpp: "
+                "macOS: brew install llama.cpp | Linux: download from "
+                "https://github.com/ggml-org/llama.cpp/releases"
+            )
     
     def _init_predictor(self):
         """Initialize Surya predictor and inference manager."""
@@ -112,6 +128,8 @@ class SuryaAdapter(BaseOCRAdapter):
             
             return full_text, stats
             
+        except RuntimeError:
+            raise
         except Exception as e:
             latency = time.perf_counter() - start_time
             return "", {

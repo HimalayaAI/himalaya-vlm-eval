@@ -18,7 +18,7 @@ This project is completely isolated from the main `nepeval` codebase. It evaluat
 - Any OpenAI-compatible API endpoint
 
 ### Local Models
-- **Surya OCR**: Auto-spawns vllm (GPU) or llama.cpp (CPU) server
+- **Surya OCR**: Requires Docker (GPU) or llama.cpp server binary (CPU)
 - **Tesseract**: Classic OCR with Nepali language support
 - **trOCR**: Hugging Face's Transformer-based OCR model for Nepali
 
@@ -38,11 +38,11 @@ Choose the model(s) you want to use:
 
 | Model | Command | Notes |
 |-------|---------|-------|
-| **Surya** (local, GPU/CPU) | `pip install -e '.[surya]'` | Auto-spawns inference server |
+| **Surya** (local, GPU/CPU) | `pip install -e '.[surya]'` | Requires Docker (vllm) or llama.cpp server binary |
 | **Tesseract** (local) | `pip install -e '.[tesseract]'` | Requires system binary + Nepali lang |
 | **trOCR** (local, HF) | `pip install -e '.[trocr]'` | Uses `syubraj/TrOCR_Nepali` model |
 | **EasyOCR** (local) | `pip install -e '.[easyocr]'` | - |
-| **PaddleOCR** (local) | `pip install -e '.[paddle]'` | - |
+| **PaddleOCR** (local) | `pip install -e '.[paddle]'` | Requires [paddlepaddle](https://www.paddlepaddle.org.cn/en/install/quick) (Python 3.9-3.13 only) |
 
 ## Model Setup Instructions
 
@@ -61,17 +61,21 @@ Or use the fallback environment variables:
 ### For Local Models
 
 #### Surya OCR
+
 ```bash
 pip install -e '.[surya]'
-# Surya auto-spawns vllm (GPU) or llama.cpp (CPU) on first use
+# Surya requires an inference backend:
+# - For GPU: Docker with NVIDIA runtime (auto-spawns vllm)
+# - For CPU: llama.cpp server binary (https://github.com/ggml-org/llama.cpp/releases)
+# 
+# If Docker is available, Surya will auto-spawn vllm.
+# For CPU-only, install llama.cpp and run:
+#   export SURYA_INFERENCE_BACKEND=llamacpp
+#   export LLAMA_CPP_BINARY=/path/to/llama-server
+#   # Then run the benchmark
 ```
 
-For CPU-only inference with limited RAM:
-```bash
-# Install llama.cpp server manually
-export SURYA_INFERENCE_URL=http://localhost:8000/v1
-# Then run the benchmark
-```
+Note: Surya requires either Docker (for GPU) or the `llama-server` binary (for CPU). If neither is available, the benchmark will fail with a clear error message indicating how to install the required dependency.
 
 #### Tesseract
 ```bash
@@ -98,10 +102,43 @@ sudo cp tessdata/nep.traineddata /usr/share/tessdata/
 export TESSDATA_PREFIX="$(pwd)"
 ```
 
+#### PaddleOCR
+```bash
+# 1. Install PaddleOCR
+pip install -e '.[paddle]'
+
+# 2. Install paddlepaddle (required for PaddleOCR 3.x)
+# PaddlePaddle is not available on PyPI. Install from official channel:
+# CPU version:
+pip install paddlepaddle
+
+# GPU version (requires CUDA):
+# pip install paddlepaddle-gpu
+
+# See https://www.paddlepaddle.org.cn/en/install/quick for more options
+
+# Note: PaddlePaddle supports Python 3.9-3.13. Python 3.14+ is not supported.
+```
+
 #### trOCR
 ```bash
 pip install -e '.[trocr]'
 # Model (syubraj/TrOCR_Nepali) downloads on first run from Hugging Face
+```
+
+#### PaddleOCR
+```bash
+# 1. Install PaddleOCR
+pip install -e '.[paddle]'
+
+# 2. Install paddlepaddle (required for PaddleOCR 3.x)
+# CPU version:
+pip install paddlepaddle
+
+# GPU version (requires CUDA):
+# pip install paddlepaddle-gpu
+
+# See https://www.paddlepaddle.org.cn/en/install/quick for more options
 ```
 
 ## Run Evaluations
@@ -137,12 +174,23 @@ python scripts/run_unified_benchmark.py \
   --concurrency 1  # Sequential for local models
 ```
 
+**Note**: Surya requires Docker to auto-spawn the inference server. Make sure Docker is installed and running.
+
 #### Tesseract (Local)
 ```bash
 python scripts/run_unified_benchmark.py \
   --model tesseract-nep \
   --limit 100 \
   --output-dir results/tesseract-local
+```
+
+#### PaddleOCR (Local)
+```bash
+python scripts/run_unified_benchmark.py \
+  --model paddle \
+  --limit 100 \
+  --output-dir results/paddle-local \
+  --concurrency 1
 ```
 
 #### trOCR (Local)

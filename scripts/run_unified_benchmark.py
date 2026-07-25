@@ -45,11 +45,13 @@ def parse_args():
     parser.add_argument(
         "--model",
         required=True,
-        choices=["api", "surya", "tesseract-nep", "trocr"],
+        choices=["api", "surya", "tesseract-nep", "trocr", "easyocr", "paddle"],
         help="Model to benchmark. 'api' requires --api-base-url. "
              "'surya' runs locally with auto-spawned server. "
              "'tesseract-nep' runs locally with Nepali lang pack. "
-             "'trocr' runs locally with Hugging Face model."
+             "'trocr' runs locally with Hugging Face model. "
+             "'easyocr' runs locally with EasyOCR. "
+             "'paddle' runs locally with PaddleOCR."
     )
     parser.add_argument(
         "--api-base-url",
@@ -141,6 +143,14 @@ def load_adapter():
     elif args.model == "trocr":
         from nepeval_ocr.adapters.trocr import TrOCRAdapter
         return TrOCRAdapter(device=args.device)
+    
+    elif args.model == "easyocr":
+        from nepeval_ocr.adapters.easyocr import EasyOCRAdapter
+        return EasyOCRAdapter(langs=["ne", "en"], device=args.device)
+    
+    elif args.model == "paddle":
+        from nepeval_ocr.adapters.paddle import PaddleOCRAdapter
+        return PaddleOCRAdapter(lang="ne", device=args.device)
     
     else:
         raise ValueError(f"Unknown model type: {args.model}")

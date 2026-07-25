@@ -23,9 +23,10 @@ easyocr = [
     "torch",
     "torchvision",
 ]
+# PaddleOCR requires paddlepaddle which is not available on PyPI
+# Install paddlepaddle from: https://www.paddlepaddle.org.cn/en/install/quick
 paddle = [
-    "paddlepaddle",
-    "paddleocr",
+    "paddleocr>=2.0",
 ]
 hf = [
     "transformers",
