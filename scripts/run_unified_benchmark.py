@@ -32,7 +32,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 
 from nepeval_ocr.dataset import load_nepali_pixel_dataset
 from nepeval_ocr.scorers import compute_metrics
@@ -93,6 +93,18 @@ def parse_args():
 
 def timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def load_existing_samples(samples_path: Path) -> List[dict]:
+    """Load existing samples from a completed or partial run."""
+    samples = []
+    if samples_path.exists():
+        with samples_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    samples.append(json.loads(line))
+    return samples
 
 
 def append_jsonl(handle, row: dict[str, Any]) -> None:
@@ -156,7 +168,7 @@ def load_adapter():
         raise ValueError(f"Unknown model type: {args.model}")
 
 
-def evaluate_one(item, adapter):
+def evaluate_one(item, adapter, start_time: float = None, total_items: int = 0, completed: int = 0):
     """Evaluate a single sample and return results."""
     sample_id, image, ground_truth, metadata = item
     result = {
@@ -189,6 +201,24 @@ def evaluate_one(item, adapter):
                 "response": response_text,
                 "metrics": compute_metrics(ground_truth, response_text),
             })
+            
+            # Print progress with ETA for local models
+            if start_time is not None and total_items > 0:
+                elapsed = time.perf_counter() - start_time
+                completed += 1
+                samples_per_sec = completed / elapsed if elapsed > 0 else 0
+                remaining = total_items - completed
+                eta_sec = remaining / samples_per_sec if samples_per_sec > 0 else 0
+                
+                eta_min = int(eta_sec / 60)
+                eta_sec_rem = int(eta_sec % 60)
+                elapsed_min = int(elapsed / 60)
+                
+                level = metadata.get("level", "unknown")
+                print(f"  [{completed}/{total_items}] [{level}] {latency:.2f}s | "
+                      f"Avg: {elapsed/completed:.2f}s | "
+                      f"ETA: {eta_min}m {eta_sec_rem}s (elapsed: {elapsed_min}m) | "
+                      f"sample_id={sample_id[:16]}...", flush=True)
     except Exception as exc:
         result.update({
             "ok": False,
@@ -225,18 +255,36 @@ def main():
     dataset_gen = load_nepali_pixel_dataset(split="train")
     
     items = []
+    skipped_pages = 0
+    level_counts = collections.Counter()
+    
     for i, item in enumerate(dataset_gen):
-        if args.limit and i >= args.limit:
+        if args.limit and len(items) >= args.limit:
             break
+        metadata = item[3]
+        level = metadata.get("level", "unknown")
+        level_counts[level] += 1
+        
+        # Skip page-level and exact-level samples for Surya (they cause timeout issues)
+        if args.model == "surya" and level in ("page", "exact"):
+            skipped_pages += 1
+            continue
         items.append(item)
     
-    print(f"Loaded {len(items)} items. Starting benchmark...")
+    print(f"Dataset loaded. Level distribution: {dict(level_counts)}", flush=True)
+    if skipped_pages > 0:
+        print(f"Skipped {skipped_pages} samples (page/exact) for Surya", flush=True)
+    print(f"Total items to process: {len(items)}", flush=True)
     
-    # Pre-flight check
+    # Pre-flight check with warm-up for local models
     if items:
         print("Pre-flight: testing adapter on first sample...", flush=True)
         try:
-            preflight = evaluate_one(items[0], adapter)
+            first_item = items[0]
+            first_metadata = first_item[3]
+            first_level = first_metadata.get("level", "unknown")
+            print(f"  Sample level: {first_level}", flush=True)
+            preflight = evaluate_one(first_item, adapter)
             if not preflight["ok"]:
                 print(
                     f"\nPre-flight check FAILED for {args.model}.\n"
@@ -249,52 +297,92 @@ def main():
         except Exception as e:
             print(f"\nPre-flight check exception: {e}", file=sys.stderr)
             sys.exit(1)
-        print("Pre-flight: OK", flush=True)
+        print(f"Pre-flight: OK (took {preflight['latency_sec']:.1f}s)", flush=True)
+        
+        # Warm-up phase for local models (first inference is slow due to model loading)
+        if args.model != "api":
+            print("Warm-up: processing 1 additional sample to load model...", flush=True)
+            print("  (This may take 1-3 minutes on first run as the model loads into memory)", flush=True)
+            if len(items) > 1:
+                warmup_item = items[1]
+                warmup_metadata = warmup_item[3]
+                warmup_level = warmup_metadata.get("level", "unknown")
+                print(f"  Warm-up sample level: {warmup_level}", flush=True)
+                warmup_start = time.perf_counter()
+                warmup = evaluate_one(warmup_item, adapter)
+                warmup_time = time.perf_counter() - warmup_start
+                print(f"Warm-up: completed (took {warmup_time:.1f}s)", flush=True)
+                # Remove warm-up sample from results
+                items = items[1:]
+            else:
+                print("Warm-up: only 1 item available, skipping", flush=True)
     
     # Run benchmark
     samples = []
     started_at = datetime.now(timezone.utc).isoformat()
     
+    # Check for existing samples and resume if available
+    existing_samples = []
+    if samples_path.exists():
+        existing_samples = load_existing_samples(samples_path)
+        if existing_samples:
+            print(f"Found {len(existing_samples)} existing samples. Resuming from where we left off...", flush=True)
+            # Remove processed samples from items
+            processed_ids = {s["sample_id"] for s in existing_samples}
+            items = [item for item in items if item[0] not in processed_ids]
+            # Show info about first remaining item
+            if items:
+                next_item = items[0]
+                next_level = next_item[3].get("level", "unknown")
+                print(f"  Next sample ({next_item[0]}) will be level: {next_level}", flush=True)
+    
     if args.model == "api":
         # API models use concurrent futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as executor:
             futures = [executor.submit(evaluate_one, item, adapter) for item in items]
-            with samples_path.open("w", encoding="utf-8") as samples_handle:
-                for completed, future in enumerate(concurrent.futures.as_completed(futures), start=1):
+            with samples_path.open("a", encoding="utf-8") as samples_handle:
+                for completed, future in enumerate(concurrent.futures.as_completed(futures), start=len(existing_samples)):
                     sample = future.result()
                     samples.append(sample)
                     append_jsonl(samples_handle, sample)
                     
-                    if completed % 25 == 0 or completed == len(futures):
+                    if completed % 25 == 0 or completed == len(existing_samples) + len(futures):
                         progress = {
                             "model": model_name,
                             "completed_completions": completed,
-                            "total_completions": len(futures),
+                            "total_completions": len(existing_samples) + len(futures),
                             "errored_completions": sum(1 for item in samples if not item["ok"]),
                             "updated_at": datetime.now(timezone.utc).isoformat(),
                         }
                         with progress_path.open("w") as f:
                             json.dump(progress, f)
-                        print(f"  {model_name}: {completed}/{len(futures)} completions", flush=True)
+                        print(f"  {model_name}: {completed}/{len(existing_samples) + len(futures)} completions", flush=True)
     else:
         # Local models - sequential processing
-        with samples_path.open("w", encoding="utf-8") as samples_handle:
-            for completed, item in enumerate(items, start=1):
-                sample = evaluate_one(item, adapter)
+        start_time = time.perf_counter()
+        total_items = len(existing_samples) + len(items)
+        with samples_path.open("a", encoding="utf-8") as samples_handle:
+            for completed, item in enumerate(items, start=len(existing_samples) + 1):
+                # Show what sample is starting
+                sample_id, image, ground_truth, metadata = item
+                level = metadata.get("level", "unknown")
+                print(f"  Processing [{completed}/{total_items}] [{level}] sample_id={sample_id[:16]}...", flush=True)
+                
+                sample = evaluate_one(item, adapter, start_time=start_time, total_items=total_items, completed=completed-1)
                 samples.append(sample)
                 append_jsonl(samples_handle, sample)
                 
-                if completed % 25 == 0 or completed == len(items):
+                if completed % 25 == 0 or completed == total_items:
                     progress = {
                         "model": model_name,
                         "completed_completions": completed,
-                        "total_completions": len(items),
+                        "total_completions": total_items,
                         "errored_completions": sum(1 for s in samples if not s["ok"]),
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
                     with progress_path.open("w") as f:
                         json.dump(progress, f)
-                    print(f"  {model_name}: {completed}/{len(items)} completions", flush=True)
+                    print(f"  {model_name}: {completed}/{total_items} completions", flush=True)
     
     # Summarize results
     valid_samples = [s for s in samples if s["ok"]]

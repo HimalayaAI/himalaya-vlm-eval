@@ -12,6 +12,18 @@ Usage:
     text = adapter.evaluate_sample(image)
 """
 import os
+import re
+import sys
+
+# Set backend BEFORE any surya imports to ensure llamacpp is used
+# This must be done at module level, before surya modules are imported
+if "surya" not in sys.modules:
+    import surya.settings
+    surya.settings.settings.SURYA_INFERENCE_BACKEND = "llamacpp"
+    # Clear SURYA_INFERENCE_URL to force local inference instead of remote
+    os.environ.pop("SURYA_INFERENCE_URL", None)
+    surya.settings.settings.SURYA_INFERENCE_URL = None
+
 from typing import Any, Dict, Tuple
 from PIL.Image import Image
 from .base import BaseOCRAdapter
@@ -55,13 +67,7 @@ class SuryaAdapter(BaseOCRAdapter):
         
         # Pre-validate backend availability by trying to create manager
         try:
-            # Set llamacpp backend for CPU inference
-            import surya.settings
-            if not surya.settings.settings.SURYA_INFERENCE_BACKEND:
-                surya.settings.settings.SURYA_INFERENCE_BACKEND = "llamacpp"
-            
             # Try to create a manager to validate backend is available
-            from surya.inference import SuryaInferenceManager
             test_manager = SuryaInferenceManager()
         except Exception as e:
             raise RuntimeError(
@@ -100,23 +106,30 @@ class SuryaAdapter(BaseOCRAdapter):
         start_time = time.perf_counter()
         
         try:
-            # Surya returns blocks with text. For single images,
-            # we typically want the first block's text.
-            # The output format: list of pages, each with blocks
-            predictions = self._predictor([image])
+            # Surya v2 returns a list of PageOCRResult objects
+            # Each PageOCRResult has a blocks list
+            results = self._predictor([image])
             
-            if not predictions or not predictions.pages:
+            if not results:
                 return "", {"latency_sec": time.perf_counter() - start_time}
             
-            # Extract text from first page's first block
-            page = predictions.pages[0]
-            blocks = page.blocks
+            # Get the first page's blocks
+            first_page = results[0]
+            blocks = first_page.blocks
             
             if not blocks:
                 return "", {"latency_sec": time.perf_counter() - start_time}
             
-            # Combine text from all blocks (sometimes text is split)
-            full_text = "\n".join(b.text.strip() for b in blocks if b.text)
+            # Combine text from all blocks using html_to_text to preserve line breaks
+            def html_to_text(html):
+                """Convert HTML to plain text, preserving line breaks."""
+                if not html:
+                    return ""
+                text = re.sub(r'<br\s*/?>', '\n', html)
+                text = re.sub(r'<[^>]+>', '', text)
+                return text
+            
+            full_text = "\n".join(html_to_text(b.html).strip() for b in blocks if b.html)
             
             latency = time.perf_counter() - start_time
             
