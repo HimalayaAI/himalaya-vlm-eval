@@ -1,0 +1,52 @@
+# Classical and specialised OCR engines, run in-process. Transcription benchmarks only.
+
+- id: tesseract-nep
+  display_name: Tesseract (nep)
+  org: Google / Tesseract OCR
+  kind: ocr_engine
+  open_weights: true
+  license: Apache-2.0
+  url: https://github.com/tesseract-ocr/tesseract
+  adapter: tesseract
+  params:
+    lang: nep
+
+- id: easyocr-ne
+  display_name: EasyOCR (ne+en)
+  org: JaidedAI
+  kind: ocr_engine
+  open_weights: true
+  license: Apache-2.0
+  url: https://github.com/JaidedAI/EasyOCR
+  adapter: easyocr
+  params:
+    langs: [ne, en]
+
+- id: paddleocr-ne
+  display_name: PaddleOCR PP-OCRv5 (ne)
+  org: Baidu
+  kind: ocr_engine
+  open_weights: true
+  license: Apache-2.0
+  url: https://github.com/PaddlePaddle/PaddleOCR
+  adapter: paddle
+  params:
+    lang: ne
+
+- id: surya
+  display_name: Surya OCR
+  org: Datalab
+  kind: ocr_engine
+  open_weights: true
+  url: https://github.com/datalab-to/surya
+  adapter: surya
+
+- id: trocr-nepali
+  display_name: TrOCR Nepali
+  org: Community (syubraj)
+  kind: ocr_engine
+  open_weights: true
+  url: https://huggingface.co/syubraj/TrOCR_Nepali
+  adapter: trocr
+  params:
+    checkpoint: syubraj/TrOCR_Nepali

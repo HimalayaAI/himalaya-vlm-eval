@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv python install 3.12
+      - run: uv sync --locked --extra run --extra api --extra s3 --extra dev
+      - run: uv run ruff check src tests
+      - run: uv run pytest -q
+
+  api-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t nepeval-api:ci .
+      - name: smoke test the image against an empty store
+        run: |
+          mkdir -p /tmp/store && chmod 777 /tmp/store
+          docker run -d --name api -p 8000:8000 -e NEPEVAL_STORE=/store -v /tmp/store:/store nepeval-api:ci
+          for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 1; done
+          curl -sf localhost:8000/v1/benchmarks | python3 -c 'import json,sys; assert len(json.load(sys.stdin)["data"]) > 30'
+          docker rm -f api

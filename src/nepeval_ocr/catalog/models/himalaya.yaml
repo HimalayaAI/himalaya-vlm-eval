@@ -1,0 +1,74 @@
+# HimalayaAI models served on Tarka (https://tarka.rest/v1). Ids match Tarka's
+# GET /v1/models exactly, as the studio's MODEL_REGISTRY contract requires.
+# Native OCR models go through Tarka's POST /ocr; multimodal chat models through
+# /chat/completions — the same split the studio's Vision playground makes.
+
+- id: glm-ocr-nepali
+  display_name: glm-ocr-nepali
+  org: HimalayaAI
+  kind: vlm
+  endpoint: tarka:/ocr
+  adapter: tarka_ocr
+  params:
+    model: glm-ocr-nepali
+    concurrency: 8
+
+- id: glm-ocr
+  display_name: glm-ocr (base control)
+  org: Zhipu AI
+  kind: vlm
+  endpoint: tarka:/ocr
+  adapter: tarka_ocr
+  params:
+    model: glm-ocr
+    concurrency: 8
+
+- id: himalaya-gemma-4-bf16
+  display_name: himalaya-gemma-4-bf16
+  org: HimalayaAI
+  kind: vlm
+  endpoint: tarka:/chat/completions
+  adapter: openai_compat
+  params:
+    model: himalaya-gemma-4-bf16
+    base_url: https://tarka.rest/v1
+    api_key_env: [TARKA_API_KEY, NEPEVAL_API_TOKEN]
+    concurrency: 8
+
+- id: himalaya-gemma-4-q8
+  display_name: himalaya-gemma-4-q8
+  org: HimalayaAI
+  kind: vlm
+  endpoint: tarka:/chat/completions
+  adapter: openai_compat
+  params:
+    model: himalaya-gemma-4-q8
+    base_url: https://tarka.rest/v1
+    api_key_env: [TARKA_API_KEY, NEPEVAL_API_TOKEN]
+    concurrency: 8
+
+- id: himalaya-gemma-4-q4
+  display_name: himalaya-gemma-4-q4
+  org: HimalayaAI
+  kind: vlm
+  endpoint: tarka:/chat/completions
+  adapter: openai_compat
+  params:
+    model: himalaya-gemma-4-q4
+    base_url: https://tarka.rest/v1
+    api_key_env: [TARKA_API_KEY, NEPEVAL_API_TOKEN]
+    concurrency: 8
+
+# The endpoint the earlier nepeval-ocr scripts benchmarked.
+- id: himalaya-bf16-scalabs
+  display_name: himalaya-bf16 (Scalabs endpoint)
+  org: HimalayaAI
+  kind: vlm
+  endpoint: scalabs:/chat/completions
+  adapter: openai_compat
+  params:
+    model: scalabs/himalaya-bf16
+    base_url: https://himalayagpt.api.scalabs.ai/v1
+    api_key_env: [TARKA_API_KEY, NEPEVAL_API_TOKEN, OPENAI_API_KEY]
+    max_tokens: 1024
+    concurrency: 4
