@@ -69,3 +69,20 @@ def test_overview_ranks_complete_coverage_first():
 def test_overview_ignores_unknown_selection():
     selected, rows = overview([result("a", "x", 1)], ["x", "nope"])
     assert selected == ["x"] and len(rows) == 1
+
+
+def test_results_from_an_older_definition_are_reexpressed_or_dropped():
+    from nepeval_ocr.schema import MetricValue
+
+    old_cer = result("old", "b", 0.9, higher=False, scale=1.0)  # headline was CER (m)
+    old_cer.metrics["acc"] = MetricValue(value=0.4)  # but it also recorded accuracy
+    old_only_cer = result("older", "b", 0.2, higher=False, scale=1.0, days_ago=3)
+    new = result("new", "b", 0.92, scale=1.0)
+    new = new.model_copy(update={
+        "benchmark": new.benchmark.model_copy(update={"primary_metric": "acc"}),
+        "metrics": {"acc": MetricValue(value=0.92, ci_low=0.9, ci_high=0.94)}})
+    rows = benchmark_board([old_cer, old_only_cer, new], "b", definition=new.benchmark)
+    assert [(r.result.model.id, round(r.result.primary.value, 2)) for r in rows] == [
+        ("new", 0.92), ("old", 0.4)]
+    bumped = new.benchmark.model_copy(update={"version": "2"})
+    assert benchmark_board([old_cer, new], "b", definition=bumped) == []

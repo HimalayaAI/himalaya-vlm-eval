@@ -251,8 +251,12 @@ def cmd_leaderboard(args: argparse.Namespace) -> int:
 
     index = Index(_store(args.store))
     index.refresh()
+    from . import catalog
+
+    entry = catalog.benchmarks().get(args.benchmark)
     rows = benchmark_board(index.results, args.benchmark,
-                           Filters(include_imported=not args.measured_only))
+                           Filters(include_imported=not args.measured_only),
+                           entry.info if entry else None)
     if not rows:
         print(f"no published results for {args.benchmark}")
         return 1

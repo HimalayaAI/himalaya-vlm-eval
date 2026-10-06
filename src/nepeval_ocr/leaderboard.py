@@ -121,13 +121,36 @@ def rank_results(results: list[RunResult], bench: BenchmarkInfo) -> list[BoardRo
     return rows
 
 
+def under_definition(r: RunResult, ref: BenchmarkInfo) -> RunResult | None:
+    """Express a result under the benchmark's current definition, or None if it cannot be.
+
+    A benchmark's headline metric or direction can change (e.g. CER → char accuracy);
+    older results that also recorded the new headline metric stay comparable, others are
+    left off the board rather than ranked on a different scale. A different `version`
+    means prompt, data or scoring changed: never comparable.
+    """
+    b = r.benchmark
+    if b.version != ref.version:
+        return None
+    if b.primary_metric == ref.primary_metric and b.higher_is_better == ref.higher_is_better:
+        return r if b == ref else r.model_copy(update={"benchmark": ref})
+    if ref.primary_metric in r.metrics:
+        return r.model_copy(update={"benchmark": ref})
+    return None
+
+
 def benchmark_board(results: Iterable[RunResult], benchmark_id: str,
-                    filters: Filters | None = None) -> list[BoardRow]:
-    reps = [r for (b, _), r in representatives(results, filters).items() if b == benchmark_id]
-    if not reps:
+                    filters: Filters | None = None,
+                    definition: BenchmarkInfo | None = None) -> list[BoardRow]:
+    """Rank one benchmark. `definition` is the benchmark as currently defined (the
+    catalog's); without it the newest result's definition is used."""
+    mine = [r for r in results if r.benchmark.id == benchmark_id]
+    if not mine:
         return []
-    bench = max(reps, key=lambda r: r.created_at).benchmark
-    return rank_results(reps, bench)
+    ref = definition or max(mine, key=lambda r: r.created_at).benchmark
+    comparable = [c for c in (under_definition(r, ref) for r in mine) if c is not None]
+    reps = list(representatives(comparable, filters).values())
+    return rank_results(reps, ref) if reps else []
 
 
 @dataclass
@@ -154,16 +177,21 @@ class OverviewRow:
 
 
 def overview(results: Iterable[RunResult], benchmark_ids: list[str] | None = None,
-             filters: Filters | None = None) -> tuple[list[str], list[OverviewRow]]:
+             filters: Filters | None = None,
+             definitions: dict[str, BenchmarkInfo] | None = None
+             ) -> tuple[list[str], list[OverviewRow]]:
     """Cross-benchmark view: mean 0–100 score and mean position per model.
 
     Models with every selected benchmark rank first; models with gaps follow, ordered by
     coverage, so a model is never ranked above another on a subset of the evidence.
     """
-    reps = representatives(results, filters)
-    present = sorted({b for b, _ in reps})
+    results = list(results)
+    defs = definitions or {}
+    boards_all = {b: benchmark_board(results, b, filters, defs.get(b))
+                  for b in sorted({r.benchmark.id for r in results})}
+    present = [b for b, rows in boards_all.items() if rows]
     selected = [b for b in (benchmark_ids or present) if b in present]
-    boards = {b: benchmark_board(reps.values(), b) for b in selected}
+    boards = {b: boards_all[b] for b in selected}
 
     per_model: dict[str, dict] = defaultdict(lambda: {"scores": [], "positions": [], "cells": {}})
     models: dict[str, ModelInfo] = {}

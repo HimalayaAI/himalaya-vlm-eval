@@ -235,7 +235,8 @@ def create_app(store: Store | None = None, refresh_seconds: float | None = None,
             if not ids:
                 return cached(request, response, {"benchmarks": [], "data": []})
         f = filters(kind, open_weights, org, include_imported, include_subsets)
-        selected, rows = overview(results, ids, f)
+        defs = {k: e.info for k, e in catalog.benchmarks().items()}
+        selected, rows = overview(results, ids, f, defs)
         return cached(request, response,
                       {"benchmarks": selected, "data": [r.to_dict() for r in rows]})
 
@@ -246,12 +247,13 @@ def create_app(store: Store | None = None, refresh_seconds: float | None = None,
         include_imported: bool = True, include_subsets: bool = True,
     ) -> Any:
         f = filters(kind, open_weights, org, include_imported, include_subsets)
-        rows = benchmark_board(index().results, benchmark_id, f)
-        info = None
+        entry = catalog.benchmarks().get(benchmark_id)
+        rows = benchmark_board(index().results, benchmark_id, f,
+                               entry.info if entry else None)
         if rows:
             info = rows[0].result.benchmark.model_dump(mode="json")
-        elif benchmark_id in catalog.benchmarks():
-            info = catalog.benchmarks()[benchmark_id].info.model_dump(mode="json")
+        elif entry is not None:
+            info = entry.info.model_dump(mode="json")
         else:
             raise HTTPException(404, f"unknown benchmark {benchmark_id!r}")
         return cached(request, response,

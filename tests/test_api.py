@@ -7,18 +7,28 @@ from nepeval_ocr.publish import publish_run
 from nepeval_ocr.runner import evaluate, infer
 from nepeval_ocr.store import LocalStore, publish_result
 
-from .conftest import result
+from .conftest import result as _result
 from .test_runner import _answers, entry
+
+
+def result(model, bench, value, **kw):
+    """A fixture result on a real catalog benchmark, under its real definition."""
+    from nepeval_ocr.schema import MetricValue
+
+    r = _result(model, bench, value, **kw)
+    info = catalog.benchmarks()[bench].info
+    return r.model_copy(update={"benchmark": info,
+                                "metrics": {info.primary_metric: MetricValue(value=value)}})
 
 
 @pytest.fixture
 def store(tmp_path, manifest_catalog):
     s = LocalStore(tmp_path / "store")
-    for r in [result("gpt-4o", "ocrbench", 805, scale=1000, kind="imported", org="OpenAI",
+    for r in [result("gpt-4o", "ocrbench", 805, kind="imported", org="OpenAI",
                      open_weights=False),
-              result("qwen", "ocrbench", 700, scale=1000, open_weights=True),
-              result("qwen", "mmstar", 60, category="general"),
-              result("gpt-4o", "mmstar", 70, category="general", org="OpenAI")]:
+              result("qwen", "ocrbench", 700, open_weights=True),
+              result("qwen", "mmstar", 60),
+              result("gpt-4o", "mmstar", 70, org="OpenAI")]:
         publish_result(s, r)
     _answers(manifest_catalog["texts"])
     run_dir = infer(entry(concurrency=1), catalog.resolve_benchmark("local-ocr"), tmp_path / "w")
@@ -93,7 +103,7 @@ def test_etag_conditional_get(store):
         tag = r1.headers["etag"]
         r2 = c.get("/v1/leaderboard/ocrbench", headers={"If-None-Match": tag})
         assert r2.status_code == 304
-        publish_result(store, result("new", "ocrbench", 100, scale=1000))
+        publish_result(store, result("new", "ocrbench", 100))
         c.post("/v1/admin/refresh")
         r3 = c.get("/v1/leaderboard/ocrbench", headers={"If-None-Match": tag})
         assert r3.status_code == 200 and len(r3.json()["data"]) == 3
@@ -102,7 +112,7 @@ def test_etag_conditional_get(store):
 def test_bad_files_do_not_break_the_board(store):
     store.put("runs/broken/result.json", b"{not json", "application/json")
     store.put("runs/mismatch/result.json",
-              result("x", "ocrbench", 1, scale=1000).model_dump_json().encode(), "application/json")
+              result("x", "ocrbench", 1).model_dump_json().encode(), "application/json")
     with client(store) as c:
         h = c.get("/health").json()
         assert h["invalid"] == 2 and h["runs"] == 5
