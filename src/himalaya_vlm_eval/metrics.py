@@ -9,6 +9,7 @@ from __future__ import annotations
 import random
 import statistics
 from collections.abc import Callable, Sequence
+from typing import Any
 
 from . import text as T
 
@@ -215,12 +216,36 @@ def get_metric(name: str) -> Metric:
 
 
 def bootstrap_ci(
-    values: Sequence[float], *, n_resamples: int = 1000, alpha: float = 0.05, seed: int = 0
+    values: Sequence[float], *, n_resamples: int = 1000, alpha: float = 0.05, seed: int = 0,
+    groups: Sequence[Any] | None = None,
 ) -> tuple[float, float]:
-    """Percentile bootstrap CI of the mean. Deterministic for a given seed."""
+    """Percentile bootstrap CI of the mean. Deterministic for a given seed.
+
+    With `groups` (one id per value, e.g. the document a page or question came from), whole
+    groups are resampled (cluster bootstrap): samples of one document are correlated, and
+    resampling them independently gives an interval that is too narrow."""
     n = len(values)
     if n == 0:
         raise ValueError("no values")
+    if groups is not None:
+        if len(groups) != n:
+            raise ValueError("groups and values differ in length")
+        clusters: dict[Any, list[float]] = {}
+        for g, v in zip(groups, values, strict=True):
+            clusters.setdefault(g, []).append(v)
+        sums = [(sum(c), len(c)) for c in clusters.values()]
+        if len(sums) == 1:
+            m = statistics.fmean(values)
+            return m, m
+        rng = random.Random(seed)
+        means = []
+        for _ in range(n_resamples):
+            picked = rng.choices(sums, k=len(sums))
+            means.append(sum(s for s, _ in picked) / sum(k for _, k in picked))
+        means.sort()
+        lo = means[int((alpha / 2) * n_resamples)]
+        hi = means[min(n_resamples - 1, int((1 - alpha / 2) * n_resamples))]
+        return lo, hi
     if n == 1:
         return values[0], values[0]
     rng = random.Random(seed)

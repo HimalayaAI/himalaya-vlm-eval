@@ -7,6 +7,8 @@ name = "himalaya-vlm-eval"
 version = "0.2.0"
 description = "Benchmark harness and results API for OCR, document, chart, math and chat VLM benchmarks, Nepali-first."
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 # The core is what the results API needs: schema + leaderboard logic. Everything that
 # loads datasets or talks to models is an extra, so the API image stays small.

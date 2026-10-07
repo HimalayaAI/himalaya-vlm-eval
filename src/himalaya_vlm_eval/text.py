@@ -18,6 +18,10 @@ _WS = re.compile(r"\s+", re.UNICODE)
 _ZERO_WIDTH = dict.fromkeys(map(ord, "\u200b‌‍⁠﻿"))
 _DEVANAGARI_PUNCT = "।॥॰"  # । ॥ ॰
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+# A reply cut off mid-reasoning has no closing tag: everything from <think> on is reasoning.
+_THINK_OPEN = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
+# Chat templates that put <think> in the prompt leave only the closing tag in the reply.
+_THINK_CLOSE = re.compile(r"^.*</think>", re.DOTALL | re.IGNORECASE)
 _FENCE = re.compile(r"^\s*```[a-zA-Z0-9_-]*\s*\n(.*?)\n?\s*```\s*$", re.DOTALL)
 
 
@@ -61,9 +65,11 @@ def aksharas(text: str) -> list[str]:
 
 
 def clean_model_output(text: str) -> str:
-    """Strip wrapping that is not part of the answer: reasoning blocks and a code fence
-    around the whole reply. Applied before scoring, recorded in the run config."""
-    text = _THINK.sub("", text or "").replace("<|endoftext|>", "")
+    """Strip wrapping that is not part of the answer: reasoning blocks (closed, unclosed or
+    with only the closing tag) and a code fence around the whole reply. Applied before
+    scoring, recorded in the run config."""
+    text = _THINK.sub("", text or "")
+    text = _THINK_CLOSE.sub("", _THINK_OPEN.sub("", text)).replace("<|endoftext|>", "")
     match = _FENCE.match(text)
     if match:
         text = match.group(1)

@@ -89,8 +89,10 @@ def _rect(poly: Any) -> tuple[float, float, float, float]:
 
 
 def _meta(row: dict[str, Any]) -> dict[str, Any]:
-    return {k: row.get(k) for k in ("doc_type", "domain", "leaf", "format_id", "intensity",
-                                     "layout_profile", "font_name", "split")}
+    # doc_id groups a document's pages, questions and tables for the bootstrap CI.
+    return {"doc_id": str(row["id"])} | {
+        k: row.get(k) for k in ("doc_type", "domain", "leaf", "format_id", "intensity",
+                                "layout_profile", "font_name", "split")}
 
 
 def load_generator_output(spec: dict[str, Any]) -> tuple[list[Sample], dict[str, Any]]:

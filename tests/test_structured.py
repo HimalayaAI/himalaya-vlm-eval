@@ -239,3 +239,39 @@ def test_split_multi_prefers_the_longest_gold_rejoin():
     assert S._split_multi("क, ख, ग", ["क, ख", "ग"]) == ["क, ख", "ग"]
     assert S._split_multi("क, ख, ग", ["क", "ख", "ग"]) == ["क", "ख", "ग"]
     assert S._split_multi("क, ख, ग", []) == ["क", "ख", "ग"]
+
+
+@pytest.mark.parametrize("reply", [
+    "ANSWER NOT PRESENT",
+    "उत्तर उपलब्ध छैन।",
+    "The answer is not present in the document.",
+    "I cannot find this.",
+    "I can't find that on the page",
+    "यो कागजातमा उल्लेख गरिएको छैन",
+    "<think>looking…</think>फेला परेन",
+])
+def test_qa_loose_abstention_counts_refusals_in_other_words(reply):
+    s = S.score_qa(reply, [], {"answerable": False})
+    assert s["abstained_loose"] == 1.0
+    strict = reply == "ANSWER NOT PRESENT"
+    assert s["abstention_accuracy"] == float(strict) and s["qa_score"] == float(strict)
+
+
+@pytest.mark.parametrize("reply", ["राम", "छैन", "Notary public", "रु. ५,०००", ""])
+def test_qa_loose_abstention_does_not_count_an_answer(reply):
+    s = S.score_qa(reply, [], {"answerable": False})
+    assert s["abstained_loose"] == 0.0 and s["abstention_accuracy"] == 0.0
+
+
+def test_qa_loose_abstention_not_applicable_to_answerable_questions():
+    s = S.score_qa("I cannot find this.", ["राम"], {"answerable": True})
+    assert s["abstained_loose"] is None
+    assert s["false_abstention"] == 0.0  # the strict string decides false abstention
+
+
+def test_nested_table_does_not_close_the_outer_table():
+    html = ("<table><tr><td>क<table><tr><td>x</td><td>y</td></tr></table></td><td>ख</td></tr>"
+            "<tr><td>ग</td><td>घ</td></tr></table>")
+    table = S.parse_table(html)
+    assert [[td.text for td in tr.children] for tr in table.children] == [
+        ["क x y", "ख"], ["ग", "घ"]]
