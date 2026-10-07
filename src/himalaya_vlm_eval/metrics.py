@@ -115,6 +115,12 @@ def char_accuracy(pred: str, refs: Sequence[str]) -> float:
     return max(0.0, 1.0 - cer(pred, refs))
 
 
+def akshara_accuracy(pred: str, refs: Sequence[str]) -> float:
+    """1 - ACER, clipped to [0, 1]: the headline for Nepali transcription. Bounded like
+    `char_accuracy`, but a wrong vowel sign or broken conjunct costs a whole character."""
+    return max(0.0, 1.0 - acer(pred, refs))
+
+
 def exact_match(pred: str, refs: Sequence[str]) -> float:
     p = T.canonical(pred)
     return float(any(p == T.canonical(r) for r in refs))
@@ -182,6 +188,7 @@ METRICS: dict[str, Metric] = {
     "wer_loose": wer_loose,
     "ned": ned,
     "char_accuracy": char_accuracy,
+    "akshara_accuracy": akshara_accuracy,
     "exact_match": exact_match,
     "loose_match": loose_match,
     "length_ratio": length_ratio,
@@ -199,6 +206,7 @@ WORST: dict[str, float] = {
     "wer_loose": 1.0,
     "ned": 1.0,
     "char_accuracy": 0.0,
+    "akshara_accuracy": 0.0,
     "exact_match": 0.0,
     "loose_match": 0.0,
     "length_ratio": 0.0,

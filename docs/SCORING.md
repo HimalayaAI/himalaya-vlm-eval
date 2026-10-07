@@ -24,14 +24,26 @@ the whole reply, and `<|endoftext|>`.
 | Metric | Definition |
 |---|---|
 | `cer` | char edit distance / reference length, on Unicode code points. Unbounded (insertions count). |
-| `acer` | **akshara** error rate: the same edit distance over aksharas (what a reader sees as one character: a consonant cluster with its vowel signs counts as one), zero-width characters ignored. One wrong vowel sign costs one unit, not a fraction of one: `किताब`→`कताब` is `cer` 0.20 but `acer` 0.33; `विद्यालय`→`विदयालय` is 0.12 vs 0.50. Opt in by adding `acer` to a benchmark's `metrics:`. |
-| `char_accuracy` | `max(0, 1 − cer)` per sample. **Headline** for transcription: bounded, so one hallucinated paragraph on a one-word image cannot dominate the mean. |
+| `acer` | **akshara** error rate: the same edit distance over aksharas (what a reader sees as one character: a consonant cluster with its vowel signs counts as one), zero-width characters ignored. One wrong vowel sign costs one unit, not a fraction of one: `किताब`→`कताब` is `cer` 0.20 but `acer` 0.33; `विद्यालय`→`विदयालय` is 0.12 vs 0.50. |
+| `akshara_accuracy` | `max(0, 1 − acer)` per sample. **Headline** for Nepali transcription (see below). |
+| `char_accuracy` | `max(0, 1 − cer)` per sample. Bounded, so one hallucinated paragraph on a one-word image cannot dominate the mean; the headline for non-Devanagari transcription. |
 | `wer` | word edit distance / reference words; words split on whitespace only, so `ल्यायो।` ≠ `ल्यायो` |
 | `wer_loose` | `wer` on the `loose` text: punctuation (danda included), zero-width characters and case are ignored |
 | `ned` | edit distance / max(len) ∈ [0, 1] (OmniDocBench-style) |
 | `exact_match` / `loose_match` | canonical / loose equality |
 | `length_ratio` | prediction length / reference length (truncation & hallucination signal) |
 | `anls`, `relaxed_accuracy`, `contains_match` | DocVQA ANLS (τ=0.5), ChartQA 5% numeric tolerance, OCRBench containment |
+
+**Why akshara accuracy is the Nepali headline.** The most common Devanagari OCR errors are a
+dropped or wrong vowel sign, a missing halant and a broken conjunct. Each is one code point
+in a syllable of two to four, so code-point CER counts it as a fraction of an error and
+under-ranks models that make many of them. Akshara accuracy counts what a reader sees as one
+character, and stays bounded per sample like `char_accuracy`. `cer` and `char_accuracy` are
+still reported on every Nepali board for comparison with published numbers. They are also
+the only option for imported results that report CER alone. Known limits of `acer`: the
+akshara split is ours (`text.aksharas`), not a standard; a small slip inside a large conjunct
+costs as much as replacing it; a halant error that splits or merges a conjunct can cost two
+units.
 
 When a sample has several references, `cer`, `acer`, `wer`, `wer_loose` and `ned` score the best one (lowest error), as `exact_match` and `loose_match` already do.
 
@@ -74,7 +86,7 @@ required words; a low `abstained_loose` is a model that invents answers. Note: t
 
 **Page + reading order** (`nepalipixel-docs-page`). Gold blocks are the page's regions in
 `order_rank` order (the page `text`, one line per region, `[LOGO]` stripped).
-**`char_accuracy`**/`cer` on the joined page text. `reading_order`: each gold block is
+**`akshara_accuracy`**/`acer` (and `char_accuracy`/`cer`) on the joined page text. `reading_order`: each gold block is
 aligned to its most similar unused prediction line (similarity ≥ 0.5); Kendall's τ of
 the matched positions, mapped to [0, 1]. `block_recall`: share of blocks found.
 

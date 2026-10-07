@@ -9,11 +9,12 @@ board: vision/nepali-ocr
 language: ne
 description: >-
   Synthetic Nepali (Devanagari) OCR across word, sentence, paragraph and page levels,
-  many fonts and augmentation intensities. Ranked by character accuracy (1 − CER, each
-  sample capped at 0 so one hallucinated paragraph cannot dominate the mean) on
-  NFC-normalized text; raw CER and WER are reported alongside.
+  many fonts and augmentation intensities. Ranked by akshara accuracy (1 − akshara error
+  rate, each sample capped at 0 so one hallucinated paragraph cannot dominate the mean) on
+  NFC-normalized text: a wrong vowel sign or broken conjunct costs a whole character, as a
+  reader sees it. Code-point CER, character accuracy and WER are reported alongside.
 url: https://huggingface.co/datasets/himalaya-ai/nepalipixel-synthetic-ocr-benchmark
-primary_metric: char_accuracy
+primary_metric: akshara_accuracy
 higher_is_better: true
 scale_max: 1.0
 full_cases: 15000
@@ -32,5 +33,6 @@ prompt: >-
   Transcribe all text in this image exactly as written, preserving the original script,
   spelling and punctuation. Output only the transcription, with no commentary,
   translation or formatting.
-metrics: [cer, wer, ned, char_accuracy, exact_match, loose_match, length_ratio]
+metrics: [akshara_accuracy, acer, cer, char_accuracy, wer, wer_loose, ned, exact_match,
+          loose_match, length_ratio]
 breakdowns: [level, font_name, intensity, augmentations]

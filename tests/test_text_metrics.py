@@ -185,3 +185,10 @@ def test_new_metrics_are_registered_with_worst_case():
     for name in ("acer", "wer_loose"):
         assert M.get_metric(name) is getattr(M, name)
         assert M.WORST[name] == 1.0
+
+
+def test_akshara_accuracy_is_bounded_one_minus_acer():
+    assert M.akshara_accuracy("कताब", ["किताब"]) == pytest.approx(2 / 3)
+    assert M.akshara_accuracy("किताब", ["किताब"]) == 1.0
+    assert M.akshara_accuracy("नेपाल सरकार गृह मन्त्रालय", ["क"]) == 0.0  # capped, not negative
+    assert M.WORST["akshara_accuracy"] == 0.0

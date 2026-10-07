@@ -275,3 +275,12 @@ def test_nested_table_does_not_close_the_outer_table():
     table = S.parse_table(html)
     assert [[td.text for td in tr.children] for tr in table.children] == [
         ["क x y", "ख"], ["ग", "घ"]]
+
+
+def test_reading_order_reports_akshara_accuracy_on_the_page_text():
+    perfect = S.score_reading_order("\n".join(BLOCKS["blocks"]), [], BLOCKS)
+    assert perfect["akshara_accuracy"] == 1.0 and perfect["acer"] == 0.0
+    gold = {"blocks": ["किताब", "विद्यालय"]}
+    s = S.score_reading_order("कताब\nविदयालय", [], gold)
+    assert s["acer"] > s["cer"]  # vowel sign and halant errors weigh more per akshara
+    assert s["akshara_accuracy"] == pytest.approx(1 - s["acer"])
