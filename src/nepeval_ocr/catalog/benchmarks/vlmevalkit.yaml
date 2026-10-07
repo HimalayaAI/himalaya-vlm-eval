@@ -1,0 +1,305 @@
+# Standard VLM benchmarks run through VLMEvalKit, so numbers are produced the same way as
+# the OpenCompass OpenVLM leaderboard (same prompts, answer extraction and scoring).
+#
+# `vlmeval` tells the engine how to run and where the headline score lands:
+#   dataset   VLMEvalKit dataset name
+#   files     globs tried in order inside the run dir; {P} = <model alias>_<dataset>
+#   json_key  for JSON results;  column (+ optional row {col: value}) for CSV/TSV results
+#   sum       add several columns (MME)
+#   multiply  rescale to the declared scale (VLMEvalKit mixes 0–1 and 0–100)
+#   percent   value is a string like "45.33%"
+#   judge     required | extract | none — LLM judge use (extract = answer extraction only,
+#             falls back to exact matching without a judge)
+# Facts verified against VLMEvalKit main @ 54a063c5 (2026-09-30); see docs/VLMEVALKIT.md.
+
+# --- OCR -----------------------------------------------------------------------------------
+- id: ocrbench
+  engine: vlmevalkit
+  display_name: OCRBench
+  category: ocr
+  description: 1000 questions over text recognition, scene-text VQA, document VQA, KIE and handwritten math; score out of 1000.
+  url: https://github.com/Yuliang-Liu/MultimodalOCR
+  primary_metric: score
+  scale_max: 1000
+  vlmeval: {dataset: OCRBench, files: ["{P}_score.json"], json_key: Final Score, judge: none}
+
+- id: ocrbench-v2-en
+  engine: vlmevalkit
+  display_name: OCRBench v2 (EN)
+  category: ocr
+  description: OCRBench v2 English tasks — recognition, referring, spotting, extraction, parsing, reasoning.
+  url: https://github.com/Yuliang-Liu/MultimodalOCR
+  primary_metric: score
+  vlmeval: {dataset: OCRBench_v2, files: ["{P}_score.json"], json_key: English Overall Score, multiply: 100, judge: none}
+
+- id: ocrbench-v2-zh
+  engine: vlmevalkit
+  display_name: OCRBench v2 (ZH)
+  category: ocr
+  language: zh
+  description: OCRBench v2 Chinese tasks.
+  url: https://github.com/Yuliang-Liu/MultimodalOCR
+  primary_metric: score
+  vlmeval: {dataset: OCRBench_v2, files: ["{P}_score.json"], json_key: Chinese Overall Score, multiply: 100, judge: none}
+
+- id: ccocr
+  engine: vlmevalkit
+  display_name: CC-OCR
+  category: ocr
+  language: multi
+  description: Multilingual text reading, scene OCR, key information extraction and document parsing; mean of the four tracks.
+  url: https://github.com/AlibabaResearch/AdvancedLiterateMachinery
+  primary_metric: score
+  vlmeval: {dataset: CCOCR, files: ["{P}_acc.csv"], column: total, multiply: auto, judge: none}
+
+- id: olmocrbench
+  engine: vlmevalkit
+  display_name: olmOCR-Bench
+  category: ocr
+  description: Unit-test-style checks on PDF page conversion (text presence/absence, order, tables, math). Needs VLMEvalKit's olmOCRBench eval requirements.
+  url: https://github.com/allenai/olmocr
+  primary_metric: pass_rate
+  vlmeval: {dataset: olmOCRBench, files: ["olmOCRBench_eval_summary.csv"], row: {type: overall}, column: score, judge: none}
+
+- id: textvqa-val
+  engine: vlmevalkit
+  display_name: TextVQA (val)
+  category: ocr
+  description: Questions requiring reading text in natural images; VQA accuracy.
+  url: https://textvqa.org
+  primary_metric: accuracy
+  vlmeval: {dataset: TextVQA_VAL, files: ["{P}_acc.csv"], column: Overall, judge: none}
+
+# --- Documents -----------------------------------------------------------------------------
+- id: docvqa-val
+  engine: vlmevalkit
+  display_name: DocVQA (val)
+  category: document
+  description: Questions over scanned industry documents; ANLS.
+  url: https://www.docvqa.org
+  primary_metric: anls
+  vlmeval: {dataset: DocVQA_VAL, files: ["{P}_acc.csv"], column: Overall, judge: none}
+
+- id: infovqa-val
+  engine: vlmevalkit
+  display_name: InfographicVQA (val)
+  category: document
+  description: Questions over infographics; ANLS.
+  url: https://www.docvqa.org
+  primary_metric: anls
+  vlmeval: {dataset: InfoVQA_VAL, files: ["{P}_acc.csv"], column: Overall, judge: none}
+
+- id: omnidocbench
+  engine: vlmevalkit
+  display_name: OmniDocBench (EN)
+  category: document
+  description: End-to-end PDF page parsing; mean normalised edit distance over text, formula, table and reading order (English pages). Lower is better.
+  url: https://github.com/opendatalab/OmniDocBench
+  primary_metric: edit_distance
+  higher_is_better: false
+  scale_max: 1.0
+  vlmeval: {dataset: OmniDocBench, files: ["{P}_overall.tsv", "{P}_overall.csv"], column: overall_EN, judge: none}
+
+# --- Charts, figures, diagrams -------------------------------------------------------------
+- id: chartqa-test
+  engine: vlmevalkit
+  display_name: ChartQA (test)
+  category: chart
+  description: Questions over charts; relaxed accuracy (5% numeric tolerance).
+  url: https://github.com/vis-nlp/ChartQA
+  primary_metric: relaxed_accuracy
+  vlmeval: {dataset: ChartQA_TEST, files: ["{P}_acc.csv"], column: Overall, judge: none}
+
+- id: ai2d-test
+  engine: vlmevalkit
+  display_name: AI2D (test)
+  category: chart
+  description: Science diagram multiple-choice questions.
+  url: https://allenai.org/data/diagrams
+  primary_metric: accuracy
+  vlmeval: {dataset: AI2D_TEST, files: ["{P}_acc.csv"], column: Overall, multiply: 100, judge: extract}
+
+- id: charxiv-reasoning-val
+  engine: vlmevalkit
+  display_name: CharXiv Reasoning (val)
+  category: chart
+  description: Reasoning questions over real scientific-paper figures; judge-graded.
+  url: https://charxiv.github.io
+  primary_metric: accuracy
+  vlmeval: {dataset: CharXiv_reasoning_val, files: ["{P}_*_acc.csv"], column: Overall, multiply: 100, judge: required}
+
+- id: charxiv-descriptive-val
+  engine: vlmevalkit
+  display_name: CharXiv Descriptive (val)
+  category: chart
+  description: Descriptive questions over real scientific-paper figures; judge-graded.
+  url: https://charxiv.github.io
+  primary_metric: accuracy
+  vlmeval: {dataset: CharXiv_descriptive_val, files: ["{P}_*_acc.csv"], column: Overall, multiply: 100, judge: required}
+
+# --- Math ----------------------------------------------------------------------------------
+- id: mathvista-mini
+  engine: vlmevalkit
+  display_name: MathVista (testmini)
+  category: math
+  description: Mathematical reasoning in visual contexts; judge extracts the answer.
+  url: https://mathvista.github.io
+  primary_metric: accuracy
+  vlmeval: {dataset: MathVista_MINI, files: ["{P}_*_score.csv"], row: {"Task&Skill": Overall}, column: acc, judge: required}
+
+- id: mathverse-mini-vision-only
+  engine: vlmevalkit
+  display_name: MathVerse (testmini, vision-only)
+  category: math
+  description: Diagram math problems with all information in the image.
+  url: https://mathverse-cuhk.github.io
+  primary_metric: accuracy
+  vlmeval: {dataset: MathVerse_MINI_Vision_Only, files: ["{P}_*_score.csv"], column: Overall, judge: required}
+
+- id: mathvision
+  engine: vlmevalkit
+  display_name: MATH-Vision
+  category: math
+  description: Competition math problems with visual contexts.
+  url: https://mathllm.github.io/mathvision
+  primary_metric: accuracy
+  vlmeval: {dataset: MathVision, files: ["{P}_*_score.csv"], row: {Subject: Overall}, column: acc, judge: required}
+
+- id: mathvision-mini
+  engine: vlmevalkit
+  display_name: MATH-Vision (mini)
+  category: math
+  description: The 304-problem testmini split of MATH-Vision.
+  url: https://mathllm.github.io/mathvision
+  primary_metric: accuracy
+  vlmeval: {dataset: MathVision_MINI, files: ["{P}_*_score.csv"], row: {Subject: Overall}, column: acc, judge: required}
+
+- id: logicvista
+  engine: vlmevalkit
+  display_name: LogicVista
+  category: math
+  description: Logical reasoning over visual puzzles, patterns and diagrams.
+  url: https://github.com/Yijia-Xiao/LogicVista
+  primary_metric: accuracy
+  vlmeval: {dataset: LogicVista, files: ["{P}_*_score.csv"], row: {"Task&Skill": Overall}, column: acc, judge: required}
+
+- id: wemath
+  engine: vlmevalkit
+  display_name: We-Math (strict)
+  category: math
+  description: Knowledge-concept-decomposed visual math; strict score.
+  url: https://we-math.github.io
+  primary_metric: score
+  vlmeval: {dataset: WeMath, files: ["{P}_*_score.csv"], column: Score (Strict), percent: true, judge: extract}
+
+- id: dynamath
+  engine: vlmevalkit
+  display_name: DynaMath (average)
+  category: math
+  description: Visual math robustness across programmatically varied question instances; average-case accuracy.
+  url: https://dynamath.github.io
+  primary_metric: accuracy
+  vlmeval: {dataset: DynaMath, files: ["{P}_*_score.csv"], row: {Setting: Average}, column: Overall, multiply: 100, judge: required}
+
+# --- Chat / open-ended ---------------------------------------------------------------------
+- id: mmvet
+  engine: vlmevalkit
+  display_name: MM-Vet
+  category: chat
+  description: Open-ended integrated capabilities (recognition, OCR, knowledge, generation, spatial, math); GPT-judged.
+  url: https://github.com/yuweihao/MM-Vet
+  primary_metric: score
+  vlmeval: {dataset: MMVet, files: ["{P}_*_score.csv"], row: {Category: Overall}, column: acc, judge: required}
+
+- id: llavabench
+  engine: vlmevalkit
+  display_name: LLaVA-Bench (in-the-wild)
+  category: chat
+  description: Free-form visual chat; judge score relative to a reference answer.
+  url: https://github.com/haotian-liu/LLaVA
+  primary_metric: relative_score
+  vlmeval: {dataset: LLaVABench, files: ["{P}_score_*.csv"], row: {split: overall}, column: Relative Score (main), judge: required}
+
+# --- General multimodal ---------------------------------------------------------------------
+- id: mmmu-dev-val
+  engine: vlmevalkit
+  display_name: MMMU (val)
+  category: general
+  description: College-level multi-discipline multimodal questions; validation split.
+  url: https://mmmu-benchmark.github.io
+  primary_metric: accuracy
+  vlmeval: {dataset: MMMU_DEV_VAL, files: ["{P}_acc.csv"], row: {split: validation}, column: Overall, multiply: 100, judge: extract}
+
+- id: mmbench-dev-en-v11
+  engine: vlmevalkit
+  display_name: MMBench v1.1 (dev, EN)
+  category: general
+  description: Broad perception and reasoning multiple choice with circular evaluation.
+  url: https://github.com/open-compass/MMBench
+  primary_metric: accuracy
+  vlmeval: {dataset: MMBench_DEV_EN_V11, files: ["{P}_acc.csv"], column: Overall, multiply: 100, judge: extract}
+
+- id: mmstar
+  engine: vlmevalkit
+  display_name: MMStar
+  category: general
+  description: Vision-indispensable multiple-choice questions curated to avoid text-only shortcuts.
+  url: https://mmstar-benchmark.github.io
+  primary_metric: accuracy
+  vlmeval: {dataset: MMStar, files: ["{P}_acc.csv"], column: Overall, multiply: 100, judge: extract}
+
+- id: realworldqa
+  engine: vlmevalkit
+  display_name: RealWorldQA
+  category: general
+  description: Real-world spatial understanding from vehicle and everyday photos.
+  url: https://x.ai/news/grok-1.5v
+  primary_metric: accuracy
+  vlmeval: {dataset: RealWorldQA, files: ["{P}_acc.csv"], column: Overall, multiply: 100, judge: extract}
+
+- id: seedbench2-plus
+  engine: vlmevalkit
+  display_name: SEED-Bench-2-Plus
+  category: chart
+  description: Text-rich visual comprehension — charts, maps and web pages.
+  url: https://github.com/AILab-CVC/SEED-Bench
+  primary_metric: accuracy
+  vlmeval: {dataset: SEEDBench2_Plus, files: ["{P}_acc.csv"], column: Overall, multiply: 100, judge: extract}
+
+- id: blink
+  engine: vlmevalkit
+  display_name: BLINK
+  category: general
+  description: Core visual perception tasks humans solve "within a blink".
+  url: https://zeyofu.github.io/blink
+  primary_metric: accuracy
+  vlmeval: {dataset: BLINK, files: ["{P}_acc.csv"], column: Overall, multiply: 100, judge: extract}
+
+- id: mme
+  engine: vlmevalkit
+  display_name: MME
+  category: general
+  description: Yes/no perception and cognition subtasks; perception + reasoning, out of 2800.
+  url: https://github.com/BradyFU/Awesome-Multimodal-Large-Language-Models/tree/Evaluation
+  primary_metric: score
+  scale_max: 2800
+  vlmeval: {dataset: MME, files: ["{P}_score.csv"], sum: [perception, reasoning], judge: extract}
+
+# --- Hallucination ---------------------------------------------------------------------------
+- id: hallusionbench
+  engine: vlmevalkit
+  display_name: HallusionBench
+  category: hallucination
+  description: Language hallucination and visual illusion; mean of question, figure and all accuracy.
+  url: https://github.com/tianyi-lab/HallusionBench
+  primary_metric: accuracy
+  vlmeval: {dataset: HallusionBench, files: ["{P}_score.csv"], row: {split: Overall}, column: Avg, judge: extract}
+
+- id: pope
+  engine: vlmevalkit
+  display_name: POPE
+  category: hallucination
+  description: Object-existence hallucination probing; F1.
+  url: https://github.com/RUCAIBox/POPE
+  primary_metric: f1
+  vlmeval: {dataset: POPE, files: ["{P}_score.csv"], row: {split: Overall}, column: Overall, judge: extract}

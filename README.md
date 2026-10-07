@@ -1,277 +1,149 @@
 # nepeval-ocr
 
-Standalone project for benchmarking OCR and VLM models against the `himalaya-ai/nepalipixel-synthetic-ocr-benchmark` dataset.
+Benchmark harness and results API for vision-language and OCR models — Nepali-first,
+with the standard OCR, document, chart, math, chat and general suites alongside.
 
-This project is completely isolated from the main `nepeval` codebase. It evaluates image-in/text-out inference with edit distance metrics (Character Error Rate, Word Error Rate, and Exact-Match).
+- **Run** any model on any benchmark: `nepeval run --model gpt-4o,glm-ocr-nepali --bench nepalipixel,category:math`
+- **Publish** automatically to a result store (local directory or S3) when a run finishes.
+- **Serve** the results as a read-only leaderboard API that HimalayaAI Studio proxies.
 
-## Features
+```
+ runner (GPU box, laptop, CI)           result store                 results API              studio
+┌───────────────────────────┐  publish ┌──────────────────┐  read  ┌──────────────────┐ HTTP ┌─────────────┐
+│ nepeval run               │ ───────▶ │ runs/<id>/        │ ◀───── │ nepeval serve    │ ◀─── │ backend     │
+│  native engine (Nepali,   │          │   result.json     │        │ /v1/leaderboard  │      │ proxies /v1 │
+│   docs, OCR engines)      │          │   samples.jsonl.gz│        │ /v1/runs/…       │      └─────────────┘
+│  VLMEvalKit engine (std.  │          └──────────────────┘        └──────────────────┘
+│   suites, OpenCompass-    │   nepeval import ──▶ (numbers from other leaderboards)
+│   comparable)             │
+└───────────────────────────┘
+```
 
-- **Multiple Model Support**: Run evaluations with API-based VLMs or locally-hosted OCR models
-- **Unified Interface**: Single script (`run_unified_benchmark.py`) supports all model types
-- **Flexible Hosting**: Choose between cloud APIs or local inference (CPU/GPU)
-- **Nepali Language**: Optimized for Nepali OCR evaluation
-
-## Supported Models
-
-### API Models (Cloud)
-- **Scalabs Tarka** (OpenAI-compatible endpoint)
-- Any OpenAI-compatible API endpoint
-
-### Local Models
-- **Surya OCR**: Requires Docker (GPU) or llama.cpp server binary (CPU)
-- **Tesseract**: Classic OCR with Nepali language support
-- **trOCR**: Hugging Face's Transformer-based OCR model for Nepali
-
-## Setup
+## Install
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -U pip
-# Default setup installs base dependencies
-python -m pip install -e .
+uv venv && uv pip install -e '.[run,api,s3,dev]'      # everything except OCR engines
+uv pip install -e '.[tesseract]'                       # + an engine: tesseract | easyocr | paddle | surya | trocr
 ```
 
-### Install Model-Specific Dependencies
+Extras keep each deployment small: the API needs only the core plus `api` (and `s3`);
+`run` adds datasets, Pillow, httpx and rapidfuzz; OCR engines bring their own stacks.
 
-Choose the model(s) you want to use:
-
-| Model | Command | Notes |
-|-------|---------|-------|
-| **Surya** (local, GPU/CPU) | `pip install -e '.[surya]'` | Requires Docker (vllm) or llama.cpp server binary |
-| **Tesseract** (local) | `pip install -e '.[tesseract]'` | Requires system binary + Nepali lang |
-| **trOCR** (local, HF) | `pip install -e '.[trocr]'` | Uses `syubraj/TrOCR_Nepali` model |
-| **EasyOCR** (local) | `pip install -e '.[easyocr]'` | - |
-| **PaddleOCR** (local) | `pip install -e '.[paddle]'` | Requires [paddlepaddle](https://www.paddlepaddle.org.cn/en/install/quick) (Python 3.9-3.13 only) |
-
-## Model Setup Instructions
-
-### For API Models (Scalabs Tarka)
-
-No extra dependencies needed. Just set your API token:
+## Run a benchmark
 
 ```bash
-export TARKA_API_KEY="your_api_key_here"
+export NEPEVAL_STORE=s3://nepeval-results          # or a directory; omit to keep results local
+export OPENROUTER_API_KEY=… TARKA_API_KEY=…
+
+nepeval list benchmarks                             # 37 benchmarks, 7 categories
+nepeval list models                                 # presets; anything else works ad hoc
+
+nepeval run --model glm-ocr-nepali,gpt-4o,easyocr-ne --bench nepalipixel --limit 2000
+nepeval run --model openrouter:qwen/qwen3-vl-8b-instruct --bench category:document
+nepeval run --model vllm:Qwen/Qwen2.5-VL-7B-Instruct --bench nepalipixel   # VLLM_BASE_URL
 ```
 
-Or use the fallback environment variables:
-- `NEPEVAL_API_TOKEN`
-- `OPENAI_API_KEY`
+What `run` does, per model × benchmark:
 
-### For Local Models
+1. Loads the benchmark (HF dataset at a pinned revision, a local manifest, or a
+   nepal-pixel-synthesis output dir) — `--limit N` takes a **seeded random** subset.
+2. Runs one **pre-flight** sample synchronously; a bad key or model fails in seconds.
+3. Fans out with bounded concurrency, appending every prediction to
+   `results/runs/<model>__<bench>__<config-hash>/predictions.jsonl`. Transient HTTP
+   errors retry with backoff; 25 consecutive failures abort; Ctrl-C keeps what finished.
+4. **Re-running the same command resumes** — successes are kept, failures retried.
+5. Scores into `result.json`: every metric, a bootstrap 95% CI on the headline metric,
+   breakdowns (by level, font, document type …), latency, token use, truncations.
+6. **Publishes** to `NEPEVAL_STORE` unless more than 5% of samples errored
+   (`--max-error-rate`). Errors are scored as worst-case, never dropped.
 
-#### Surya OCR
+One failing pair never stops the matrix; a summary table prints at the end.
+
+| Command | |
+|---|---|
+| `nepeval eval <run_dir>` | re-score saved predictions (after a scorer change) |
+| `nepeval publish <run_dir>` | publish a run evaluated earlier or elsewhere |
+| `nepeval import results.json` | publish numbers from another leaderboard (`--format-help`) |
+| `nepeval leaderboard <bench>` | print a board from the store |
+| `nepeval serve` | the results API |
+
+## Benchmarks
+
+| Category | Native (nepeval) | VLMEvalKit |
+|---|---|---|
+| OCR | `nepalipixel`, `nepalipixel-docs-page` | OCRBench, OCRBench v2 (EN/ZH), CC-OCR, olmOCR-Bench, TextVQA |
+| Document | `nepalipixel-docs-kv`, `-qa`, `-layout` | DocVQA, InfographicVQA, OmniDocBench |
+| Chart / figure | `nepalipixel-docs-table` | ChartQA, AI2D, CharXiv (reasoning, descriptive), SEED-Bench-2-Plus |
+| Math | | MathVista, MathVerse, MATH-Vision (+mini), LogicVista, We-Math, DynaMath |
+| Chat | | MM-Vet, LLaVA-Bench |
+| General | | MMMU, MMBench v1.1, MMStar, RealWorldQA, BLINK, MME |
+| Hallucination | | HallusionBench, POPE |
+
+**Native benchmarks** are YAML (`src/nepeval_ocr/catalog/benchmarks/`). A new OCR or
+short-answer VQA set is a file, no code:
+
+```yaml
+id: my-devanagari-set
+engine: native
+display_name: My Devanagari Set
+category: ocr
+primary_metric: char_accuracy
+scale_max: 1.0
+task: ocr
+dataset: {source: hf, repo: org/dataset, revision: <sha>, split: test, image: image, references: text}
+prompt: Transcribe all text in this image exactly as written.
+metrics: [char_accuracy, cer, wer, exact_match]
+```
+
+Extra catalog directories load from `NEPEVAL_CATALOG=/path/a:/path/b` and override
+built-ins by id.
+
+**NepaliPixel document benchmarks** read a nepal-pixel-synthesis output directory
+(`NEPALIPIXEL_DOCS_DIR`, rows with `split: benchmark`): key-value extraction (field F1),
+QA with "ANSWER NOT PRESENT" negatives, page transcription with reading order (Kendall τ),
+tables (TEDS on the generator's cell grid) and layout (role F1 at IoU 0.5). See
+[docs/SCORING.md](docs/SCORING.md).
+
+**VLMEvalKit benchmarks** run through a VLMEvalKit checkout so scores match the
+OpenCompass leaderboard's method. Setup and the judge model: [docs/VLMEVALKIT.md](docs/VLMEVALKIT.md).
+
+## Models
+
+Presets live in `src/nepeval_ocr/catalog/models/`: Himalaya models on Tarka
+(`glm-ocr-nepali` via `/ocr`, `himalaya-gemma-4-*` via chat), GPT, Gemini, Claude, Qwen-VL,
+Llama 4, Mistral, GLM-4.5V via OpenRouter, and Tesseract, EasyOCR, PaddleOCR, Surya,
+TrOCR in-process. Anything else, ad hoc:
+
+| Spec | Endpoint |
+|---|---|
+| `openrouter:<vendor>/<model>` | OpenRouter (`OPENROUTER_API_KEY`) |
+| `openai:<model>` | OpenAI (`OPENAI_API_KEY`) |
+| `tarka:<model>` | Tarka chat completions (`TARKA_API_KEY`) |
+| `vllm:<model>` | any local OpenAI-compatible server at `VLLM_BASE_URL` (vLLM, SGLang, llama.cpp) |
+
+Override any adapter parameter: `--model-arg max_tokens=8192 --model-arg max_image_side=2048`.
+A new kind of backend is a `Model` subclass registered with `@register_adapter("name")` or
+the `nepeval_ocr.adapters` entry-point group.
+
+## Results API
+
+`nepeval serve` (or the `ghcr.io/himalayaai/nepeval-api` image) serves the store
+read-only. Internal by design — the studio backend proxies it. Contract:
+[docs/API.md](docs/API.md); studio wiring: [docs/STUDIO_INTEGRATION.md](docs/STUDIO_INTEGRATION.md).
 
 ```bash
-pip install -e '.[surya]'
-# Surya requires an inference backend:
-# - For GPU: Docker with NVIDIA runtime (auto-spawns vllm)
-# - For CPU: llama.cpp server binary (https://github.com/ggml-org/llama.cpp/releases)
-# 
-# If Docker is available, Surya will auto-spawn vllm.
-# For CPU-only, install llama.cpp and run:
-#   export SURYA_INFERENCE_BACKEND=llamacpp
-#   export LLAMA_CPP_BINARY=/path/to/llama-server
-#   # Then run the benchmark
+NEPEVAL_STORE=s3://nepeval-results nepeval serve --port 8000
+curl localhost:8000/v1/leaderboard/nepalipixel
 ```
 
-Note: Surya requires either Docker (for GPU) or the `llama-server` binary (for CPU). If neither is available, the benchmark will fail with a clear error message indicating how to install the required dependency.
-
-#### Tesseract
-```bash
-# 1. Install Python package
-pip install -e '.[tesseract]'
-
-# 2. Install system binary and Nepali language data
-# Debian/Ubuntu:
-sudo apt install tesseract-ocr tesseract-ocr-nep
-
-# Arch Linux:
-sudo pacman -S tesseract tesseract-data-nep
-
-# 3. Verify installation
-tesseract --list-langs
-```
-
-Alternatively, copy the bundled `nep.traineddata` from the repo:
-```bash
-# Option 1: Copy to system tessdata
-sudo cp tessdata/nep.traineddata /usr/share/tessdata/
-
-# Option 2: Use TESSDATA_PREFIX (no sudo needed)
-export TESSDATA_PREFIX="$(pwd)"
-```
-
-#### PaddleOCR
-```bash
-# 1. Install PaddleOCR
-pip install -e '.[paddle]'
-
-# 2. Install paddlepaddle (required for PaddleOCR 3.x)
-# PaddlePaddle is not available on PyPI. Install from official channel:
-# CPU version:
-pip install paddlepaddle
-
-# GPU version (requires CUDA):
-# pip install paddlepaddle-gpu
-
-# See https://www.paddlepaddle.org.cn/en/install/quick for more options
-
-# Note: PaddlePaddle supports Python 3.9-3.13. Python 3.14+ is not supported.
-```
-
-#### trOCR
-```bash
-pip install -e '.[trocr]'
-# Model (syubraj/TrOCR_Nepali) downloads on first run from Hugging Face
-```
-
-#### PaddleOCR
-```bash
-# 1. Install PaddleOCR
-pip install -e '.[paddle]'
-
-# 2. Install paddlepaddle (required for PaddleOCR 3.x)
-# CPU version:
-pip install paddlepaddle
-
-# GPU version (requires CUDA):
-# pip install paddlepaddle-gpu
-
-# See https://www.paddlepaddle.org.cn/en/install/quick for more options
-```
-
-## Run Evaluations
-
-The unified benchmark script supports all model types with a single interface.
-
-### API Evaluation
-
-```bash
-export TARKA_API_KEY="your_key"
-python scripts/run_unified_benchmark.py \
-  --model api \
-  --limit 100 \
-  --output-dir results/api-scalabs \
-  --concurrency 8
-```
-
-Options:
-- `--api-base-url`: Override API endpoint (default: `https://himalayagpt.api.scalabs.ai/v1`)
-- `--api-token-env`: Custom environment variable name (default: `TARKA_API_KEY`)
-- `--concurrency`: API request parallelism (default: 4)
-- `--timeout`: Request timeout in seconds (default: 300)
-- `--retries`: Number of retry attempts (default: 3)
-
-### Local Model Evaluations
-
-#### Surya (Local)
-```bash
-python scripts/run_unified_benchmark.py \
-  --model surya \
-  --limit 100 \
-  --output-dir results/surya-local \
-  --concurrency 1  # Sequential for local models
-```
-
-**Note**: Surya requires Docker to auto-spawn the inference server. Make sure Docker is installed and running.
-
-#### Tesseract (Local)
-```bash
-python scripts/run_unified_benchmark.py \
-  --model tesseract-nep \
-  --limit 100 \
-  --output-dir results/tesseract-local
-```
-
-#### PaddleOCR (Local)
-```bash
-python scripts/run_unified_benchmark.py \
-  --model paddle \
-  --limit 100 \
-  --output-dir results/paddle-local \
-  --concurrency 1
-```
-
-#### trOCR (Local)
-```bash
-# Auto-detect GPU or use CPU explicitly
-python scripts/run_unified_benchmark.py \
-  --model trocr \
-  --device auto \  # or: cpu, cuda, mps
-  --limit 100 \
-  --output-dir results/trocr-local
-```
-
-### Common Options (All Models)
-
-- `--limit N`: Number of images to evaluate (default: 1000)
-- `--output-dir PATH`: Custom output directory
-- `--temperature`: API model temperature (default: 0.0)
-
-## Output Structure
-
-Each run generates:
-
-```
-results/<run-name>/
-├── run_config.json          # Run configuration
-├── summary.json             # Full summary with metrics
-├── summary.md               # Human-readable summary
-└── models/
-    └── <model>/
-        ├── summary.json     # Model-specific metrics
-        ├── samples.jsonl    # Individual predictions (streamed live)
-        └── progress.json    # Current progress status
-```
-
-### Metrics
-
-- **CER** (Character Error Rate): Lower is better
-- **WER** (Word Error Rate): Lower is better  
-- **Exact Match**: Percentage of perfect predictions
-- **Avg Latency**: Time per prediction (seconds)
-
-## Compare Results
-
-Compare multiple runs across different models:
-
-```bash
-python scripts/summarize_ocr_results.py \
-  --output-prefix results/ocr_comparison \
-  results/api-scalabs \
-  results/surya-local \
-  results/tesseract-local
-```
-
-This generates:
-- `results/ocr_comparison.md` - Human-readable comparison table
-- `results/ocr_comparison.json` - Raw comparison data
+Rankings follow LMArena: a model's rank is 1 + the number of models whose 95% CI is
+entirely better, so models that cannot be told apart share a rank.
 
 ## Development
 
-### Adding New Models
-
-1. Create an adapter in `src/nepeval_ocr/adapters/`
-2. Extend `BaseOCRAdapter` and implement `evaluate_sample_with_stats()`
-3. Add a case in `run_unified_benchmark.py::load_adapter()`
-
-### Testing
-
 ```bash
-# Run mock tests
-python test_mock_tesseract.py
+uv sync --extra run --extra api --extra s3 --extra dev
+uv run ruff check src tests && uv run pytest
 ```
 
-## Attribution
-
-This project uses the Nepali Pixel Synthetic OCR Benchmark:
-
-- Dataset: [himalaya-ai/nepalipixel-synthetic-ocr-benchmark](https://huggingface.co/datasets/himalaya-ai/nepalipixel-synthetic-ocr-benchmark)
-- Paper: [Koshur Pixel (arXiv:2606.23144)](https://arxiv.org/abs/2606.23144)
-
-Please cite the dataset and paper when using these evaluation data.
-
-## License
-
-This project is provided as-is for research and evaluation purposes.
+`docker build .` builds the API image; `docker/runner.Dockerfile` the runner.

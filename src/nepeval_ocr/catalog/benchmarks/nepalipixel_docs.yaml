@@ -1,0 +1,120 @@
+# Document understanding on nepal-pixel-synthesis output (Nepali government and civic
+# documents). These read a generator output directory — the document-level labels are not
+# in the published HF export. Point NEPALIPIXEL_DOCS_DIR at the output root of a run made
+# with `--split benchmark`; only rows with split=benchmark are used.
+#
+# Scorers live in nepeval_ocr/structured.py; text is compared after NFC + whitespace
+# collapse, exactly as the generator's own grounding check does.
+
+- id: nepalipixel-docs-kv
+  engine: native
+  display_name: NepaliPixel Docs · Key-Value
+  category: document
+  language: ne
+  description: >-
+    Extract named fields (citizenship number, names, dates, office …) from a rendered
+    Nepali document into JSON keyed by canonical field id. Field-level F1 over exact
+    (NFC/whitespace-normalised) values.
+  primary_metric: kv_f1
+  higher_is_better: true
+  scale_max: 1.0
+  task: vqa
+  scorer: kv
+  dataset: &docs
+    source: nepalipixel_docs
+    path_env: NEPALIPIXEL_DOCS_DIR
+    splits: [benchmark]
+    view: kv
+  prompt: >-
+    Extract the following fields from this document image. Reply with only a JSON object
+    whose keys are exactly these field ids and whose values are copied exactly as printed
+    (same script, digits and punctuation). Leave out a field that is not on the page; use a
+    list when a field occurs more than once.
+
+    Field ids: {question}
+  breakdowns: [doc_type, domain, intensity, layout_profile]
+
+- id: nepalipixel-docs-qa
+  engine: native
+  display_name: NepaliPixel Docs · QA
+  category: document
+  language: ne
+  description: >-
+    Nepali questions about a document, including unanswerable ones whose answer region was
+    painted out. ANLS on answerable questions; credit on unanswerable ones only for
+    replying exactly "ANSWER NOT PRESENT".
+  primary_metric: qa_score
+  higher_is_better: true
+  scale_max: 1.0
+  task: vqa
+  scorer: qa
+  dataset: {<<: *docs, view: qa}
+  prompt: >-
+    Answer the question using only text visible in this document image, copying the answer
+    exactly as printed. If the answer is not on the page, reply exactly: ANSWER NOT PRESENT
+
+    Question: {question}
+  breakdowns: [answerable, doc_type, domain, intensity]
+
+- id: nepalipixel-docs-page
+  engine: native
+  display_name: NepaliPixel Docs · Page OCR + Reading Order
+  category: ocr
+  language: ne
+  description: >-
+    Full-page transcription of a Nepali document. Character accuracy (1 − CER, capped) on
+    the page text in the generator's reading order; reading order itself is Kendall's τ
+    over matched blocks.
+  primary_metric: char_accuracy
+  higher_is_better: true
+  scale_max: 1.0
+  task: ocr
+  scorer: reading_order
+  dataset: {<<: *docs, view: page}
+  prompt: >-
+    Transcribe all text in this document image in natural reading order, one block
+    (heading, paragraph, field or table row) per line. Copy the text exactly as printed and
+    output only the transcription.
+  breakdowns: [doc_type, domain, intensity, layout_profile]
+
+- id: nepalipixel-docs-table
+  engine: native
+  display_name: NepaliPixel Docs · Tables
+  category: chart
+  language: ne
+  description: >-
+    Table structure recognition on cropped table regions. TEDS against the generator's
+    cell grid (row/col spans, cell text); TEDS-struct ignores text.
+  primary_metric: teds
+  higher_is_better: true
+  scale_max: 1.0
+  task: vqa  # needs instruction following (HTML output); OCR engines cannot
+  scorer: table
+  dataset: {<<: *docs, view: table}
+  prompt: >-
+    Convert the table in this image to HTML. Output a single <table> using <tr> and <td>
+    elements, with colspan/rowspan where cells span, and copy each cell's text exactly as
+    printed. Output only the HTML.
+  breakdowns: [doc_type, rows]
+
+- id: nepalipixel-docs-layout
+  engine: native
+  display_name: NepaliPixel Docs · Layout
+  category: document
+  language: ne
+  description: >-
+    Detect layout regions and their roles. F1 at IoU ≥ 0.5 with matching role (detection
+    F1 ignores the role).
+  primary_metric: layout_f1
+  higher_is_better: true
+  scale_max: 1.0
+  task: vqa  # needs instruction following (JSON boxes); OCR engines cannot
+  scorer: layout
+  dataset: {<<: *docs, view: layout}
+  prompt: >-
+    Detect the layout regions of this document page. Reply with only a JSON array; each item
+    is {"role": R, "bbox": [x0, y0, x1, y1]} where R is one of title, subtitle, header,
+    section_heading, paragraph, text_line, key_value, table, list_item, signature, stamp,
+    photo, logo, footer, image, and the box is on a 0–1000 grid relative to the page width
+    and height.
+  breakdowns: [doc_type, layout_profile]

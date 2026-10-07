@@ -1,0 +1,205 @@
+# Third-party VLMs through OpenRouter (one key, one API). Ids verified against
+# https://openrouter.ai/api/v1/models on 2026-10-06. Anything not listed here can be run
+# ad hoc as `openrouter:<vendor>/<model>`; add it here once it should carry metadata.
+#
+# Reasoning models get temperature: null (several reject it) and a larger token budget.
+
+# --- OpenAI ------------------------------------------------------------------------------
+- id: gpt-4o
+  display_name: GPT-4o
+  org: OpenAI
+  open_weights: false
+  endpoint: openrouter:openai/gpt-4o
+  adapter: openai_compat
+  params: &openrouter
+    model: openai/gpt-4o
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: [OPENROUTER_API_KEY]
+    concurrency: 8
+
+- id: gpt-4.1
+  display_name: GPT-4.1
+  org: OpenAI
+  open_weights: false
+  endpoint: openrouter:openai/gpt-4.1
+  adapter: openai_compat
+  params: {<<: *openrouter, model: openai/gpt-4.1}
+
+- id: gpt-4.1-mini
+  display_name: GPT-4.1 mini
+  org: OpenAI
+  open_weights: false
+  endpoint: openrouter:openai/gpt-4.1-mini
+  adapter: openai_compat
+  params: {<<: *openrouter, model: openai/gpt-4.1-mini}
+
+- id: gpt-5
+  display_name: GPT-5
+  org: OpenAI
+  open_weights: false
+  endpoint: openrouter:openai/gpt-5
+  adapter: openai_compat
+  params: &reasoning {<<: *openrouter, model: openai/gpt-5, temperature: null, max_tokens: 16384}
+
+- id: gpt-5-mini
+  display_name: GPT-5 mini
+  org: OpenAI
+  open_weights: false
+  endpoint: openrouter:openai/gpt-5-mini
+  adapter: openai_compat
+  params: {<<: *reasoning, model: openai/gpt-5-mini}
+
+- id: gpt-5.5
+  display_name: GPT-5.5
+  org: OpenAI
+  open_weights: false
+  endpoint: openrouter:openai/gpt-5.5
+  adapter: openai_compat
+  params: {<<: *reasoning, model: openai/gpt-5.5}
+
+# --- Google ------------------------------------------------------------------------------
+- id: gemini-2.5-flash
+  display_name: Gemini 2.5 Flash
+  org: Google
+  open_weights: false
+  endpoint: openrouter:google/gemini-2.5-flash
+  adapter: openai_compat
+  params: {<<: *openrouter, model: google/gemini-2.5-flash, max_tokens: 16384}
+
+- id: gemini-2.5-pro
+  display_name: Gemini 2.5 Pro
+  org: Google
+  open_weights: false
+  endpoint: openrouter:google/gemini-2.5-pro
+  adapter: openai_compat
+  params: {<<: *reasoning, model: google/gemini-2.5-pro}
+
+- id: gemini-3.1-pro-preview
+  display_name: Gemini 3.1 Pro (preview)
+  org: Google
+  open_weights: false
+  endpoint: openrouter:google/gemini-3.1-pro-preview
+  adapter: openai_compat
+  params: {<<: *reasoning, model: google/gemini-3.1-pro-preview}
+
+- id: gemini-3.5-flash
+  display_name: Gemini 3.5 Flash
+  org: Google
+  open_weights: false
+  endpoint: openrouter:google/gemini-3.5-flash
+  adapter: openai_compat
+  params: {<<: *reasoning, model: google/gemini-3.5-flash}
+
+- id: gemma-3-27b-it
+  display_name: Gemma 3 27B
+  org: Google
+  open_weights: true
+  params_b: 27
+  license: Gemma
+  endpoint: openrouter:google/gemma-3-27b-it
+  adapter: openai_compat
+  params: {<<: *openrouter, model: google/gemma-3-27b-it}
+
+# --- Anthropic ---------------------------------------------------------------------------
+- id: claude-haiku-4.5
+  display_name: Claude Haiku 4.5
+  org: Anthropic
+  open_weights: false
+  endpoint: openrouter:anthropic/claude-haiku-4.5
+  adapter: openai_compat
+  params: {<<: *openrouter, model: anthropic/claude-haiku-4.5}
+
+- id: claude-sonnet-4.5
+  display_name: Claude Sonnet 4.5
+  org: Anthropic
+  open_weights: false
+  endpoint: openrouter:anthropic/claude-sonnet-4.5
+  adapter: openai_compat
+  params: {<<: *openrouter, model: anthropic/claude-sonnet-4.5}
+
+- id: claude-opus-4.5
+  display_name: Claude Opus 4.5
+  org: Anthropic
+  open_weights: false
+  endpoint: openrouter:anthropic/claude-opus-4.5
+  adapter: openai_compat
+  params: {<<: *openrouter, model: anthropic/claude-opus-4.5}
+
+- id: claude-sonnet-5.5
+  display_name: Claude Sonnet 5.5
+  org: Anthropic
+  open_weights: false
+  endpoint: openrouter:anthropic/claude-sonnet-5.5
+  adapter: openai_compat
+  params: {<<: *openrouter, model: anthropic/claude-sonnet-5.5}
+
+# --- Open-weight VLMs ----------------------------------------------------------------------
+- id: qwen2.5-vl-72b-instruct
+  display_name: Qwen2.5-VL 72B
+  org: Alibaba
+  open_weights: true
+  params_b: 72
+  license: Qwen
+  endpoint: openrouter:qwen/qwen2.5-vl-72b-instruct
+  adapter: openai_compat
+  params: {<<: *openrouter, model: qwen/qwen2.5-vl-72b-instruct}
+
+- id: qwen3-vl-8b-instruct
+  display_name: Qwen3-VL 8B
+  org: Alibaba
+  open_weights: true
+  params_b: 8
+  license: Apache-2.0
+  endpoint: openrouter:qwen/qwen3-vl-8b-instruct
+  adapter: openai_compat
+  params: {<<: *openrouter, model: qwen/qwen3-vl-8b-instruct}
+
+- id: qwen3-vl-30b-a3b-instruct
+  display_name: Qwen3-VL 30B-A3B
+  org: Alibaba
+  open_weights: true
+  params_b: 30
+  license: Apache-2.0
+  endpoint: openrouter:qwen/qwen3-vl-30b-a3b-instruct
+  adapter: openai_compat
+  params: {<<: *openrouter, model: qwen/qwen3-vl-30b-a3b-instruct}
+
+- id: qwen3-vl-235b-a22b-instruct
+  display_name: Qwen3-VL 235B-A22B
+  org: Alibaba
+  open_weights: true
+  params_b: 235
+  license: Apache-2.0
+  endpoint: openrouter:qwen/qwen3-vl-235b-a22b-instruct
+  adapter: openai_compat
+  params: {<<: *openrouter, model: qwen/qwen3-vl-235b-a22b-instruct}
+
+- id: mistral-small-3.2-24b-instruct
+  display_name: Mistral Small 3.2 24B
+  org: Mistral AI
+  open_weights: true
+  params_b: 24
+  license: Apache-2.0
+  endpoint: openrouter:mistralai/mistral-small-3.2-24b-instruct
+  adapter: openai_compat
+  params: {<<: *openrouter, model: mistralai/mistral-small-3.2-24b-instruct}
+
+- id: llama-4-maverick
+  display_name: Llama 4 Maverick
+  org: Meta
+  open_weights: true
+  params_b: 400
+  license: Llama 4 Community
+  endpoint: openrouter:meta-llama/llama-4-maverick
+  adapter: openai_compat
+  params: {<<: *openrouter, model: meta-llama/llama-4-maverick}
+
+- id: glm-4.5v
+  display_name: GLM-4.5V
+  org: Zhipu AI
+  open_weights: true
+  params_b: 106
+  license: MIT
+  endpoint: openrouter:z-ai/glm-4.5v
+  adapter: openai_compat
+  params: {<<: *openrouter, model: z-ai/glm-4.5v}

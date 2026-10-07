@@ -1,0 +1,35 @@
+# Benchmarks run by nepeval's own runner: transcription (CER/WER) and short-answer VQA.
+# Add one with a YAML entry; see nepeval_ocr/benchmarks.py for every key.
+
+id: nepalipixel
+engine: native
+display_name: NepaliPixel OCR
+category: ocr
+language: ne
+description: >-
+  Synthetic Nepali (Devanagari) OCR across word, sentence, paragraph and page levels,
+  many fonts and augmentation intensities. Ranked by character accuracy (1 − CER, each
+  sample capped at 0 so one hallucinated paragraph cannot dominate the mean) on
+  NFC-normalized text; raw CER and WER are reported alongside.
+url: https://huggingface.co/datasets/himalaya-ai/nepalipixel-synthetic-ocr-benchmark
+primary_metric: char_accuracy
+higher_is_better: true
+scale_max: 1.0
+full_cases: 15000
+version: "1"
+task: ocr
+dataset:
+  source: hf
+  repo: himalaya-ai/nepalipixel-synthetic-ocr-benchmark
+  revision: 14f9108a1f3409c041a520981c0474ee07a210a8
+  split: train
+  image: image
+  references: text
+  id: id
+  meta: [level, font_name, size_px, intensity, augmentations, source]
+prompt: >-
+  Transcribe all text in this image exactly as written, preserving the original script,
+  spelling and punctuation. Output only the transcription, with no commentary,
+  translation or formatting.
+metrics: [cer, wer, ned, char_accuracy, exact_match, loose_match, length_ratio]
+breakdowns: [level, font_name, intensity, augmentations]
