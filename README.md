@@ -105,6 +105,8 @@ same command continues where it stopped**:
 | `himeval eval <run_dir>` | re-score saved predictions (after a scorer change) |
 | `himeval publish <run_dir>` | publish a run evaluated earlier or elsewhere |
 | `himeval import results.json` | publish numbers from another leaderboard (`--format-help`) |
+| `himeval import-arena` | import Arena's Vision and Document boards (official dataset) |
+| `himeval meta refresh` | refresh prices and context lengths (OpenRouter + overrides) |
 | `himeval leaderboard <bench>` | print a board from the store |
 | `himeval serve` | the results API |
 
@@ -119,6 +121,7 @@ same command continues where it stopped**:
 | Chat | | MM-Vet, LLaVA-Bench |
 | General | | MMMU, MMBench v1.1, MMStar, RealWorldQA, BLINK, MME |
 | Hallucination | | HallusionBench, POPE |
+| Arena (imported) | | Vision Arena × 10 categories, Document Arena — style control on/off |
 
 **Native benchmarks** are YAML (`src/himalaya_vlm_eval/catalog/benchmarks/`). A new OCR or
 short-answer VQA set is a file, no code:
@@ -147,6 +150,42 @@ tables (TEDS on the generator's cell grid) and layout (role F1 at IoU 0.5). See
 
 **VLMEvalKit benchmarks** run through a VLMEvalKit checkout so scores match the
 OpenCompass leaderboard's method. Setup and the judge model: [docs/VLMEVALKIT.md](docs/VLMEVALKIT.md).
+
+## Arena boards (imported)
+
+Arena (arena.ai) has already ranked most frontier VLMs by human votes, so those boards are
+imported rather than re-run:
+
+```bash
+HIMEVAL_STORE=s3://himalaya-vlm-eval-results himeval import-arena   # latest snapshot, all boards
+himeval import-arena --arena vision --history                       # every published snapshot
+```
+
+- **Source:** the official dataset [`lmarena-ai/leaderboard-dataset`](https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset)
+  (CC BY 4.0), pinned to a commit per import. arena.ai itself is never read: its Terms of
+  Use forbid scraping and automated access.
+- **Boards:** Vision Arena's 10 categories and Document Arena, each with and without style
+  control (`catalog/arena.yaml` → `arena-vision-ocr`, `arena-vision-ocr-no-style-control`,
+  …). Scores are Bradley–Terry ratings with 95% CIs; `cases` are votes. A category missing
+  from the newest snapshot is retired on arena.ai and is skipped.
+- **Attribution:** every imported result carries the licence and credit line; show it
+  wherever an Arena board is shown.
+- Re-importing a snapshot is a no-op; a new snapshot adds results (newest wins on the board).
+
+## Leaderboard layout and prices
+
+`catalog/boards.yaml` lays the boards out the way the studio shows them: two top-bar types,
+**Vision** and **Document**, each with a side list of categories. Arena's categories come first,
+then Nepali and the measured suites (Vision: … OCR · Nepali OCR · Chart · Math · Chat ·
+General · Hallucination; Document: Overall · Nepali Fields · Nepali Q&A · Nepali Page · Nepali
+Table · Nepali Layout · Document Q&A · Parsing). A benchmark goes on its category's default
+board unless its YAML says `board:`. Served by `GET /v1/boards`.
+
+Price ($ per 1M input/output tokens) and context length drive the board's filters and the
+Pareto chart. Results never carry them (prices change, results do not). `himeval meta refresh`
+writes `meta/models.json` from OpenRouter's public models API plus `catalog/model_meta.yaml`
+overrides, and the API joins it on at serve time. Unmatched models show N/A. Matching only crosses
+reasoning-effort suffixes and snapshot dates, because a wrong price is worse than none.
 
 ## Models
 
@@ -177,8 +216,14 @@ HIMEVAL_STORE=s3://himalaya-vlm-eval-results himeval serve --port 8000
 curl localhost:8000/v1/leaderboard/nepalipixel
 ```
 
-Rankings follow LMArena: a model's rank is 1 + the number of models whose 95% CI is
-entirely better, so models that cannot be told apart share a rank.
+Rankings follow Arena: a model's rank is 1 + the number of models whose 95% CI is
+entirely better, so models that cannot be told apart share a rank; the *rank spread* runs
+from there to the worst rank the CIs allow. On the Vision/OCR board both match arena.ai's
+own numbers.
+
+Arena publishes new snapshots every week or so. `.github/workflows/arena-sync.yml` imports
+them weekly and refreshes prices once the repository has `HIMEVAL_STORE` and write
+credentials as secrets. Until then it skips, and `himeval import-arena` runs by hand.
 
 ## Development
 

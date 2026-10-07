@@ -83,7 +83,7 @@ def build_imported(entry: dict[str, Any],
     model = ModelInfo(**entry["model"])
     source = SourceInfo(kind="imported", **{**(default_source or {}), **entry.get("source", {})})
     score = float(entry["score"])
-    if not 0 <= score <= bench.scale_max:
+    if bench.scale_max is not None and not 0 <= score <= bench.scale_max:
         raise ValueError(
             f"{model.id} on {bench.id}: score {score} outside the benchmark scale "
             f"0–{bench.scale_max} (convert it first)"

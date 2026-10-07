@@ -31,6 +31,8 @@ Category = Literal[
 ]
 ModelKind = Literal["vlm", "ocr_engine"]
 SourceKind = Literal["measured", "imported"]
+# What `cases` counts: evaluated samples, or pairwise human votes (Arena boards).
+CasesUnit = Literal["cases", "votes"]
 
 
 def _check_id(value: str, what: str) -> str:
@@ -77,21 +79,43 @@ class BenchmarkInfo(BaseModel):
     language: str = "en"
     primary_metric: str
     higher_is_better: bool = True
-    # Scale of the primary metric as stored: (0, 1), (0, 100), (0, 1000) …
-    scale_max: float = 100.0
+    # Scale of the primary metric as stored: (0, 1), (0, 100), (0, 1000) … None for an
+    # unbounded rating (Arena's Bradley–Terry score), which has no 0–100 mapping and so
+    # never enters a cross-benchmark average.
+    scale_max: float | None = 100.0
     # Size of the full evaluation set; a run with fewer cases is a subset.
     full_cases: int | None = None
     # Bumped when prompt, scoring or data change in a way that breaks comparability.
     version: str = "1"
+    # Where the board sits in the leaderboard layout: "<type>/<category>" from
+    # catalog/boards.yaml, e.g. "vision/ocr". Set by the catalog.
+    board: str | None = None
+    # Arena boards come in two variants; True = style-controlled (Arena's default view).
+    style_control: bool | None = None
+    cases_unit: CasesUnit = "cases"
 
     @field_validator("id")
     @classmethod
     def _id(cls, v: str) -> str:
         return _check_id(v, "benchmark id")
 
-    def score_100(self, value: float) -> float:
-        """Map a primary-metric value onto 0–100, higher is better (for cross-suite averages)."""
-        frac = max(0.0, min(1.0, value / self.scale_max)) if self.scale_max else 0.0
+    @field_validator("scale_max")
+    @classmethod
+    def _scale(cls, v: float | None) -> float | None:
+        if v is not None and v <= 0:
+            raise ValueError("scale_max must be positive (or null for an unbounded rating)")
+        return v
+
+    @property
+    def bounded(self) -> bool:
+        return self.scale_max is not None
+
+    def score_100(self, value: float) -> float | None:
+        """Map a primary-metric value onto 0–100, higher is better (for cross-suite averages).
+        None for an unbounded rating."""
+        if self.scale_max is None:
+            return None
+        frac = max(0.0, min(1.0, value / self.scale_max))
         return 100.0 * (frac if self.higher_is_better else 1.0 - frac)
 
 
@@ -104,6 +128,9 @@ class SourceInfo(BaseModel):
     url: str | None = None  # where an imported number was taken from
     judge: str | None = None  # LLM judge model, when scoring used one
     notes: str | None = None
+    # Licence of imported data and the attribution it requires (e.g. CC-BY-4.0).
+    data_license: str | None = None
+    attribution: str | None = None
 
 
 class MetricValue(BaseModel):

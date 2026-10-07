@@ -10,6 +10,7 @@
   engine: native
   display_name: NepaliPixel Docs · Key-Value
   category: document
+  board: document/nepali-fields
   language: ne
   description: >-
     Extract named fields (citizenship number, names, dates, office …) from a rendered
@@ -38,6 +39,7 @@
   engine: native
   display_name: NepaliPixel Docs · QA
   category: document
+  board: document/nepali-qa
   language: ne
   description: >-
     Nepali questions about a document, including unanswerable ones whose answer region was
@@ -60,6 +62,7 @@
   engine: native
   display_name: NepaliPixel Docs · Page OCR + Reading Order
   category: ocr
+  board: document/nepali-page
   language: ne
   description: >-
     Full-page transcription of a Nepali document. Character accuracy (1 − CER, capped) on
@@ -81,6 +84,7 @@
   engine: native
   display_name: NepaliPixel Docs · Tables
   category: chart
+  board: document/nepali-table
   language: ne
   description: >-
     Table structure recognition on cropped table regions. TEDS against the generator's
@@ -101,6 +105,7 @@
   engine: native
   display_name: NepaliPixel Docs · Layout
   category: document
+  board: document/nepali-layout
   language: ne
   description: >-
     Detect layout regions and their roles. F1 at IoU ≥ 0.5 with matching role (detection

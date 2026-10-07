@@ -5,6 +5,8 @@
     himeval eval results/runs/<dir>            re-score saved predictions
     himeval publish results/runs/<dir>         push to HIMEVAL_STORE
     himeval import results.json                publish numbers from another leaderboard
+    himeval import-arena                       Arena's Vision/Document boards (HF dataset)
+    himeval meta refresh                       prices + context lengths (OpenRouter)
     himeval leaderboard nepalipixel            print a board from the store
     himeval serve                              results API
 
@@ -308,6 +310,41 @@ def cmd_import(args: argparse.Namespace) -> int:
     return 1 if counts["failed"] else 0
 
 
+def cmd_import_arena(args: argparse.Namespace) -> int:
+    from .arena import import_arena
+
+    store = None if args.dry_run else _store(args.store)
+    arenas = [a.strip() for a in args.arena.split(",")] if args.arena else None
+    counts = import_arena(store, arenas=arenas, revision=args.revision, history=args.history,
+                          dry_run=args.dry_run, force=args.force)
+    print(json.dumps(counts))
+    if store is not None and not args.no_meta:
+        _refresh_meta(store, dry_run=False)
+    return 1 if counts.get("failed") else 0
+
+
+def _refresh_meta(store: Any, *, dry_run: bool) -> dict[str, Any]:
+    from . import catalog, meta
+    from .store import iter_results
+
+    models = [r.model for r in iter_results(store)] + [e.info for e in catalog.models().values()]
+    try:
+        summary = meta.refresh(store, models, dry_run=dry_run)
+    except Exception as exc:  # a price lookup never fails an import
+        log.error("meta refresh failed (prices unchanged): %s: %s", type(exc).__name__, exc)
+        return {"error": str(exc)}
+    log.info("meta: priced %d of %d models%s", summary["priced"], summary["models"],
+             " (dry run)" if dry_run else f" → {meta.META_KEY}")
+    return summary
+
+
+def cmd_meta(args: argparse.Namespace) -> int:
+    summary = _refresh_meta(_store(args.store), dry_run=args.dry_run)
+    if args.show_missing and "missing" in summary:
+        print("\n".join(summary["missing"]))
+    return 1 if "error" in summary else 0
+
+
 def cmd_leaderboard(args: argparse.Namespace) -> int:
     from .api import Index
     from .leaderboard import Filters, benchmark_board
@@ -318,20 +355,27 @@ def cmd_leaderboard(args: argparse.Namespace) -> int:
 
     entry = catalog.benchmarks().get(args.benchmark)
     rows = benchmark_board(index.results, args.benchmark,
-                           Filters(include_imported=not args.measured_only),
+                           Filters(include_imported=not args.measured_only, meta=index.meta),
                            entry.info if entry else None)
     if not rows:
         print(f"no published results for {args.benchmark}")
         return 1
+    unit = rows[0].result.benchmark.cases_unit
     table = []
     for r in rows:
         p = r.result.primary
+        d = r.to_dict()
         ci = f"{p.ci_low:.4g}–{p.ci_high:.4g}" if p.ci_low is not None else ""
-        table.append({"rank": r.rank, "model": r.result.model.id, "org": r.result.model.org,
-                      "score": f"{p.value:.4g}", "95% CI": ci, "cases": r.result.cases,
-                      "source": r.result.source.kind,
-                      "date": r.result.created_at.strftime("%Y-%m-%d")})
-    _table(table, ["rank", "model", "org", "score", "95% CI", "cases", "source", "date"])
+        price = d["pricing"]
+        table.append({
+            "rank": r.rank, "spread": f"{r.rank}–{d['rank_worst']}",
+            "model": r.result.model.id, "org": r.result.model.org,
+            "score": f"{p.value:.4g}", "95% CI": ci, unit: r.result.cases,
+            "$/M in/out": f"{price['input']:g}/{price['output']:g}" if price else "N/A",
+            "source": r.result.source.kind, "date": r.result.created_at.strftime("%Y-%m-%d"),
+        })
+    _table(table, ["rank", "spread", "model", "org", "score", "95% CI", unit, "$/M in/out",
+                   "source", "date"])
     return 0
 
 
@@ -387,6 +431,27 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-error-rate", type=float, default=0.05)
     s.add_argument("--force", action="store_true", help="overwrite a conflicting result")
     s.set_defaults(func=cmd_publish)
+
+    s = sub.add_parser("import-arena",
+                       help="import Arena leaderboards (official HF dataset, CC BY 4.0)")
+    s.add_argument("--arena", help="comma list of arena ids from catalog/arena.yaml "
+                                   "(default: all)")
+    s.add_argument("--revision", help="dataset commit or branch (default: main, pinned)")
+    s.add_argument("--history", action="store_true",
+                   help="every published snapshot, not just the latest")
+    s.add_argument("--store")
+    s.add_argument("--dry-run", action="store_true")
+    s.add_argument("--force", action="store_true")
+    s.add_argument("--no-meta", action="store_true",
+                   help="skip refreshing prices/context lengths afterwards")
+    s.set_defaults(func=cmd_import_arena)
+
+    s = sub.add_parser("meta", help="model metadata: prices and context lengths")
+    s.add_argument("action", choices=["refresh"])
+    s.add_argument("--store")
+    s.add_argument("--dry-run", action="store_true")
+    s.add_argument("--show-missing", action="store_true", help="list models left unpriced")
+    s.set_defaults(func=cmd_meta)
 
     s = sub.add_parser("import", help="publish results measured elsewhere")
     s.add_argument("file", nargs="?")

@@ -1,0 +1,49 @@
+# Leaderboard layout: the top-bar types and, under each, the categories of its side list,
+# in display order. Every benchmark sits on exactly one board, "<type>/<category>"; a
+# category with several benchmarks shows a switcher between them.
+#
+# These labels are the studio's vocabulary for the Benchmarks page (picked 2026-10-07).
+# Arena's own category names are kept as Arena prints them. Changing a label here changes
+# what the studio shows; adding or removing one is a decision in both repos.
+
+types:
+  - id: vision
+    label: Vision
+    categories:
+      - {id: overall, label: Overall}
+      - {id: english, label: English}
+      - {id: chinese, label: Chinese}
+      - {id: captioning, label: Captioning}
+      - {id: creative-writing, label: Creative Writing}
+      - {id: diagram, label: Diagram}
+      - {id: entity-recognition, label: Entity Recognition}
+      - {id: homework, label: Homework}
+      - {id: humor, label: Humor}
+      - {id: ocr, label: OCR}
+      - {id: nepali-ocr, label: Nepali OCR}
+      - {id: chart, label: Chart}
+      - {id: math, label: Math}
+      - {id: chat, label: Chat}
+      - {id: general, label: General}
+      - {id: hallucination, label: Hallucination}
+  - id: document
+    label: Document
+    categories:
+      - {id: overall, label: Overall}
+      - {id: nepali-fields, label: Nepali Fields}
+      - {id: nepali-qa, label: Nepali Q&A}
+      - {id: nepali-page, label: Nepali Page}
+      - {id: nepali-table, label: Nepali Table}
+      - {id: nepali-layout, label: Nepali Layout}
+      - {id: doc-qa, label: Document Q&A}
+      - {id: parsing, label: Parsing}
+
+# A benchmark without its own `board:` goes on the board for its category.
+defaults:
+  ocr: vision/ocr
+  document: document/doc-qa
+  chart: vision/chart
+  math: vision/math
+  chat: vision/chat
+  general: vision/general
+  hallucination: vision/hallucination

@@ -366,7 +366,7 @@ def run_benchmark(model_entry: ModelEntry, bench: BenchmarkEntry, work_dir: Path
     score, score_file = parse_score(run_dir, spec, prefix)
     cases, failed = count_predictions(run_dir, prefix)
     info = bench.info
-    if not 0 <= score <= info.scale_max * 1.0001:
+    if info.scale_max is not None and not 0 <= score <= info.scale_max * 1.0001:
         raise VLMEvalError(f"{bench.info.id}: parsed score {score} outside 0–{info.scale_max}; "
                            f"check the catalog spec against {score_file}")
 
