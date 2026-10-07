@@ -192,3 +192,12 @@ def test_akshara_accuracy_is_bounded_one_minus_acer():
     assert M.akshara_accuracy("किताब", ["किताब"]) == 1.0
     assert M.akshara_accuracy("नेपाल सरकार गृह मन्त्रालय", ["क"]) == 0.0  # capped, not negative
     assert M.WORST["akshara_accuracy"] == 0.0
+
+
+def test_fold_digits_and_digit_folded_akshara_accuracy():
+    assert T.fold_digits("रु. ४२,०५८") == "रु. 42,058"
+    assert T.fold_digits("42") == "42"
+    assert M.akshara_accuracy("42", ["४२"]) == 0.0  # the headline compares digits as printed
+    assert M.akshara_accuracy_digitfold("42", ["४२"]) == 1.0
+    assert M.akshara_accuracy_digitfold("४२", ["42"]) == 1.0
+    assert M.akshara_accuracy_digitfold("43", ["४२"]) == 0.5

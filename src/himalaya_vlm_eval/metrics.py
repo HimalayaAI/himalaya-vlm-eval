@@ -121,6 +121,12 @@ def akshara_accuracy(pred: str, refs: Sequence[str]) -> float:
     return max(0.0, 1.0 - acer(pred, refs))
 
 
+def akshara_accuracy_digitfold(pred: str, refs: Sequence[str]) -> float:
+    """`akshara_accuracy` with Devanagari digits read as ASCII on both sides (४२ = 42). The gap
+    to `akshara_accuracy` is what writing numbers in the other script cost."""
+    return akshara_accuracy(T.fold_digits(pred), [T.fold_digits(r) for r in refs])
+
+
 def exact_match(pred: str, refs: Sequence[str]) -> float:
     p = T.canonical(pred)
     return float(any(p == T.canonical(r) for r in refs))
@@ -189,6 +195,7 @@ METRICS: dict[str, Metric] = {
     "ned": ned,
     "char_accuracy": char_accuracy,
     "akshara_accuracy": akshara_accuracy,
+    "akshara_accuracy_digitfold": akshara_accuracy_digitfold,
     "exact_match": exact_match,
     "loose_match": loose_match,
     "length_ratio": length_ratio,
@@ -207,6 +214,7 @@ WORST: dict[str, float] = {
     "ned": 1.0,
     "char_accuracy": 0.0,
     "akshara_accuracy": 0.0,
+    "akshara_accuracy_digitfold": 0.0,
     "exact_match": 0.0,
     "loose_match": 0.0,
     "length_ratio": 0.0,

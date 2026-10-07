@@ -128,12 +128,23 @@ def _pred_pairs(pred: Any, multi: dict[str, list[str]]) -> list[tuple[str, str]]
     return pairs
 
 
+def _true_positives(gold: list[tuple[str, str]], pairs: list[tuple[str, str]]) -> int:
+    remaining = list(pairs)
+    tp = 0
+    for g in gold:
+        if g in remaining:
+            remaining.remove(g)
+            tp += 1
+    return tp
+
+
 def score_kv(pred: str, refs: Sequence[str], target: Any) -> Score:
     """Field-level precision/recall/F1 over (field_id, value) pairs, as a multiset.
 
     target = {"fields": [[name, value], …]}. A pair counts only if the key matches exactly
     and the NFC/whitespace-normalised value matches exactly; `kv_value_sim` gives the
     softer per-field view (mean best similarity of each gold value under its key).
+    `kv_f1_digitfold` is `kv_f1` with Devanagari digits read as ASCII (४२ = 42).
     """
     gold = [(str(k), norm(v)) for k, v in target["fields"] if norm(v)]
     multi = {k.casefold(): [v for g, v in gold if g == k]
@@ -142,20 +153,20 @@ def score_kv(pred: str, refs: Sequence[str], target: Any) -> Score:
     # Field ids are matched case-insensitively ("Name" = "name"); values stay exact.
     canon = {k.casefold(): k for k, _ in gold}
     pairs = [(canon.get(k.casefold(), k), v) for k, v in _pred_pairs(parsed, multi)]
-    remaining = list(pairs)
-    tp = 0
-    for g in gold:
-        if g in remaining:
-            remaining.remove(g)
-            tp += 1
+    tp = _true_positives(gold, pairs)
     p = tp / len(pairs) if pairs else 0.0
     r = tp / len(gold) if gold else 1.0
     sims = []
     for k, v in gold:
         cands = [pv for pk, pv in pairs if pk == k]
         sims.append(max((_sim(v, c) for c in cands), default=0.0))
+    folded_tp = _true_positives([(k, T.fold_digits(v)) for k, v in gold],
+                                [(k, T.fold_digits(v)) for k, v in pairs])
+    folded_p = folded_tp / len(pairs) if pairs else 0.0
+    folded_r = folded_tp / len(gold) if gold else 1.0
     return {
         "kv_f1": _f1(p, r) if gold or pairs else 1.0,
+        "kv_f1_digitfold": _f1(folded_p, folded_r) if gold or pairs else 1.0,
         "kv_precision": p,
         "kv_recall": r,
         "kv_value_sim": sum(sims) / len(sims) if sims else 1.0,
@@ -206,11 +217,16 @@ def score_qa(pred: str, refs: Sequence[str], target: Any) -> Score:
     answerable = bool(target.get("answerable", True))
     abstained = is_abstention(pred)
     if answerable:
-        acc = 0.0 if abstained else anls(T.canonical(T.clean_model_output(pred)),
-                                         [T.canonical(r) for r in refs])
-        return {"qa_score": acc, "anls_answerable": acc, "false_abstention": float(abstained),
-                "abstention_accuracy": None, "abstained_loose": None}
-    return {"qa_score": float(abstained), "anls_answerable": None, "false_abstention": None,
+        answer = T.canonical(T.clean_model_output(pred))
+        golds = [T.canonical(r) for r in refs]
+        acc = 0.0 if abstained else anls(answer, golds)
+        folded = 0.0 if abstained else anls(T.fold_digits(answer),
+                                            [T.fold_digits(g) for g in golds])
+        return {"qa_score": acc, "qa_score_digitfold": folded, "anls_answerable": acc,
+                "false_abstention": float(abstained), "abstention_accuracy": None,
+                "abstained_loose": None}
+    return {"qa_score": float(abstained), "qa_score_digitfold": float(abstained),
+            "anls_answerable": None, "false_abstention": None,
             "abstention_accuracy": float(abstained),
             "abstained_loose": float(abstained or is_loose_abstention(pred))}
 
@@ -280,8 +296,10 @@ def score_reading_order(pred: str, refs: Sequence[str], target: Any,
     recall = len(positions) / len(gold_blocks) if gold_blocks else 1.0
     tau = _kendall_tau(positions)
     page_acer = acer(pred_text, [gold_text])
+    folded_acer = acer(T.fold_digits(pred_text), [T.fold_digits(gold_text)])
     return {
         "akshara_accuracy": max(0.0, 1.0 - page_acer),
+        "akshara_accuracy_digitfold": max(0.0, 1.0 - folded_acer),
         "acer": page_acer,
         "cer": cer,
         "char_accuracy": max(0.0, 1.0 - cer),
@@ -516,11 +534,15 @@ def teds(pred: _Node | None, gold: _Node, structure_only: bool = False) -> float
 
 
 def score_table(pred: str, refs: Sequence[str], target: Any) -> Score:
-    """target = {"cells": [...]} (see table_from_cells)."""
+    """target = {"cells": [...]} (see table_from_cells). `teds_digitfold` reads Devanagari
+    digits as ASCII in both tables."""
     gold = table_from_cells(target["cells"])
     parsed = parse_table(pred)
+    folded_gold = table_from_cells([{**c, "text": T.fold_digits(str(c.get("text", "")))}
+                                    for c in target["cells"]])
     return {
         "teds": teds(parsed, gold),
+        "teds_digitfold": teds(parse_table(T.fold_digits(pred)), folded_gold),
         "teds_struct": teds(parsed, gold, structure_only=True),
         "table_parse_ok": float(parsed is not None),
     }
@@ -628,25 +650,26 @@ SCORERS: dict[str, Scorer] = {
 }
 
 METRICS: dict[str, list[str]] = {
-    "kv": ["kv_f1", "kv_precision", "kv_recall", "kv_value_sim", "kv_doc_exact", "kv_parse_ok"],
-    "qa": ["qa_score", "anls_answerable", "false_abstention", "abstention_accuracy",
-           "abstained_loose"],
-    "reading_order": ["akshara_accuracy", "acer", "cer", "char_accuracy", "reading_order",
-                      "block_recall"],
-    "table": ["teds", "teds_struct", "table_parse_ok"],
+    "kv": ["kv_f1", "kv_f1_digitfold", "kv_precision", "kv_recall", "kv_value_sim",
+           "kv_doc_exact", "kv_parse_ok"],
+    "qa": ["qa_score", "qa_score_digitfold", "anls_answerable", "false_abstention",
+           "abstention_accuracy", "abstained_loose"],
+    "reading_order": ["akshara_accuracy", "akshara_accuracy_digitfold", "acer", "cer",
+                      "char_accuracy", "reading_order", "block_recall"],
+    "table": ["teds", "teds_digitfold", "teds_struct", "table_parse_ok"],
     "layout": ["layout_f1", "layout_precision", "layout_recall", "detection_f1",
                "layout_parse_ok"],
 }
 
 # Worst-case values for an errored sample, per scorer.
 WORST: dict[str, Score] = {
-    "kv": {"kv_f1": 0.0, "kv_precision": 0.0, "kv_recall": 0.0, "kv_value_sim": 0.0,
-           "kv_doc_exact": 0.0, "kv_parse_ok": 0.0},
-    "qa": {"qa_score": 0.0},
-    "reading_order": {"akshara_accuracy": 0.0, "acer": 1.0, "cer": 1.0, "char_accuracy": 0.0,
-                      "reading_order": None,
+    "kv": {"kv_f1": 0.0, "kv_f1_digitfold": 0.0, "kv_precision": 0.0, "kv_recall": 0.0,
+           "kv_value_sim": 0.0, "kv_doc_exact": 0.0, "kv_parse_ok": 0.0},
+    "qa": {"qa_score": 0.0, "qa_score_digitfold": 0.0},
+    "reading_order": {"akshara_accuracy": 0.0, "akshara_accuracy_digitfold": 0.0, "acer": 1.0,
+                      "cer": 1.0, "char_accuracy": 0.0, "reading_order": None,
                       "block_recall": 0.0},
-    "table": {"teds": 0.0, "teds_struct": 0.0, "table_parse_ok": 0.0},
+    "table": {"teds": 0.0, "teds_digitfold": 0.0, "teds_struct": 0.0, "table_parse_ok": 0.0},
     "layout": {"layout_parse_ok": 0.0, "layout_f1": 0.0, "layout_precision": 0.0,
                "layout_recall": 0.0, "detection_f1": 0.0},
 }

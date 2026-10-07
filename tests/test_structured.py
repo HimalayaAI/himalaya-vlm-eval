@@ -120,7 +120,7 @@ def test_teds_missing_row_and_garbage():
     missing = '<table><tr><td colspan="2">शीर्षक</td></tr></table>'
     assert S.score_table(missing, [], {"cells": CELLS})["teds"] == pytest.approx(1 - 3 / 6)
     assert S.score_table("no table", [], {"cells": CELLS}) == {
-        "teds": 0.0, "teds_struct": 0.0, "table_parse_ok": 0.0}
+        "teds": 0.0, "teds_digitfold": 0.0, "teds_struct": 0.0, "table_parse_ok": 0.0}
 
 
 def test_teds_tolerates_unclosed_tags_and_th():
@@ -284,3 +284,31 @@ def test_reading_order_reports_akshara_accuracy_on_the_page_text():
     s = S.score_reading_order("कताब\nविदयालय", [], gold)
     assert s["acer"] > s["cer"]  # vowel sign and halant errors weigh more per akshara
     assert s["akshara_accuracy"] == pytest.approx(1 - s["acer"])
+
+
+# --- digit-folded twins (४२ = 42) ---------------------------------------------------------
+
+
+def test_kv_digitfold_accepts_the_other_digit_script():
+    target = {"fields": [["citizenship_number", "४२-४२-२०५८"], ["name", "राम"]]}
+    s = S.score_kv('{"citizenship_number": "42-42-2058", "name": "राम"}', [], target)
+    assert s["kv_f1"] == 0.5 and s["kv_f1_digitfold"] == 1.0
+    wrong = S.score_kv('{"citizenship_number": "42-42-2059", "name": "राम"}', [], target)
+    assert wrong["kv_f1_digitfold"] == 0.5  # a wrong digit is still wrong
+
+
+def test_qa_digitfold():
+    s = S.score_qa("42", ["४२"], {"answerable": True})
+    assert s["qa_score"] == 0.0 and s["qa_score_digitfold"] == 1.0
+    neg = S.score_qa("ANSWER NOT PRESENT", [], {"answerable": False})
+    assert neg["qa_score_digitfold"] == neg["qa_score"] == 1.0
+    refused = S.score_qa("ANSWER NOT PRESENT", ["४२"], {"answerable": True})
+    assert refused["qa_score_digitfold"] == 0.0
+
+
+def test_reading_order_and_table_digitfold():
+    page = S.score_reading_order("कुल 42", [], {"blocks": ["कुल ४२"]})
+    assert page["akshara_accuracy"] < 1.0 and page["akshara_accuracy_digitfold"] == 1.0
+    cells = [{"row": 0, "col": 0, "text": "रकम"}, {"row": 0, "col": 1, "text": "१०००"}]
+    t = S.score_table("<table><tr><td>रकम</td><td>1000</td></tr></table>", [], {"cells": cells})
+    assert t["teds"] < 1.0 and t["teds_digitfold"] == 1.0

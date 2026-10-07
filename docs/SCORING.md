@@ -14,6 +14,13 @@ and a decomposed nukta (`क` + `़`) vs the precomposed form (`क़`) would 
 error. Digits and orthography are **not** folded (४२ ≠ 42) — the same rule the
 nepal-pixel-synthesis grounding check uses.
 
+**Digit-folded twins.** Nepali documents print numbers in either script, and a model that
+writes `42` for a printed `४२` read the number right but wrote it in the other script. Every
+text headline has a `*_digitfold` twin that reads Devanagari digits as ASCII on both sides
+(`text.fold_digits`): `akshara_accuracy_digitfold`, `kv_f1_digitfold`, `qa_score_digitfold`,
+`teds_digitfold`. These twins are never the headline, which keeps digits as printed. The gap
+between a headline and its twin is what writing numbers in the other script cost.
+
 Before scoring, model output is cleaned of reasoning (`<think>…</think>`; an unclosed
 `<think>` from a truncated reply drops everything after it; a lone `</think>` left by a chat
 template that opened the tag in the prompt drops everything before it), a code fence wrapping
@@ -26,6 +33,7 @@ the whole reply, and `<|endoftext|>`.
 | `cer` | char edit distance / reference length, on Unicode code points. Unbounded (insertions count). |
 | `acer` | **akshara** error rate: the same edit distance over aksharas (what a reader sees as one character: a consonant cluster with its vowel signs counts as one), zero-width characters ignored. One wrong vowel sign costs one unit, not a fraction of one: `किताब`→`कताब` is `cer` 0.20 but `acer` 0.33; `विद्यालय`→`विदयालय` is 0.12 vs 0.50. |
 | `akshara_accuracy` | `max(0, 1 − acer)` per sample. **Headline** for Nepali transcription (see below). |
+| `akshara_accuracy_digitfold` | `akshara_accuracy` with Devanagari digits read as ASCII (४२ = 42) |
 | `char_accuracy` | `max(0, 1 − cer)` per sample. Bounded, so one hallucinated paragraph on a one-word image cannot dominate the mean; the headline for non-Devanagari transcription. |
 | `wer` | word edit distance / reference words; words split on whitespace only, so `ल्यायो।` ≠ `ल्यायो` |
 | `wer_loose` | `wer` on the `loose` text: punctuation (danda included), zero-width characters and case are ignored |

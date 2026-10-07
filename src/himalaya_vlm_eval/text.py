@@ -40,6 +40,15 @@ def loose(text: str) -> str:
     return _WS.sub(" ", text).strip().casefold()
 
 
+_DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
+
+
+def fold_digits(text: str) -> str:
+    """Devanagari digits to ASCII (४२ → 42). Only for the `*_digitfold` secondary metrics:
+    the headlines compare digits as printed, like the generator's grounding check."""
+    return text.translate(_DEVANAGARI_DIGITS)
+
+
 def strip_zero_width(text: str) -> str:
     """Drop ZWJ/ZWNJ/ZWSP and similar zero-width characters (invisible, rendered inconsistently)."""
     return text.translate(_ZERO_WIDTH)
