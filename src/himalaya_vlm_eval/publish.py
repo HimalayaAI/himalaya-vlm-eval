@@ -18,7 +18,7 @@ from .runner import RESULT, SCORES, load_result
 from .schema import MetricValue, ModelInfo, RunResult, SourceInfo
 from .store import Store, StoreError, gzip_samples, publish_result
 
-log = logging.getLogger("nepeval")
+log = logging.getLogger("himeval")
 
 DEFAULT_MAX_ERROR_RATE = 0.05
 

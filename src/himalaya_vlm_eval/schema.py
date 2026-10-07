@@ -99,7 +99,7 @@ class SourceInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     kind: SourceKind
-    harness: str  # "nepeval-ocr", "vlmevalkit", "opencompass-openvlm", …
+    harness: str  # "himalaya-vlm-eval", "vlmevalkit", "opencompass-openvlm", …
     harness_version: str | None = None
     url: str | None = None  # where an imported number was taken from
     judge: str | None = None  # LLM judge model, when scoring used one

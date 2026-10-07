@@ -1,23 +1,27 @@
-"""`nepeval` command line.
+"""`himeval` command line.
 
-    nepeval list models | benchmarks [--category math]
-    nepeval run --model glm-ocr-nepali,gpt-4o --bench nepalipixel,category:math [--limit 500]
-    nepeval eval results/runs/<dir>            re-score saved predictions
-    nepeval publish results/runs/<dir>         push to NEPEVAL_STORE
-    nepeval import results.json                publish numbers from another leaderboard
-    nepeval leaderboard nepalipixel            print a board from the store
-    nepeval serve                              results API
+    himeval list models | benchmarks [--category math]
+    himeval run --model glm-ocr-nepali,gpt-4o --bench nepalipixel,category:math [--limit 500]
+    himeval eval results/runs/<dir>            re-score saved predictions
+    himeval publish results/runs/<dir>         push to HIMEVAL_STORE
+    himeval import results.json                publish numbers from another leaderboard
+    himeval leaderboard nepalipixel            print a board from the store
+    himeval serve                              results API
 
-`run` publishes every finished result to NEPEVAL_STORE unless --no-publish.
+`run` publishes every finished result to HIMEVAL_STORE unless --no-publish.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
+import signal
 import sys
+import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -25,17 +29,61 @@ import yaml
 
 from . import __version__
 
-log = logging.getLogger("nepeval")
+log = logging.getLogger("himeval")
 
 
 def _setup_logging(verbose: bool) -> None:
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format="%(asctime)s %(levelname).1s %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    console = logging.StreamHandler()
+    console.setLevel(logging.DEBUG if verbose else logging.INFO)
+    console.setFormatter(logging.Formatter("%(asctime)s %(levelname).1s %(message)s",
+                                           datefmt="%H:%M:%S"))
+    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, handlers=[console])
+    # Our own records are always produced at DEBUG so the log files get them; the console
+    # handler's level decides what is shown.
+    logging.getLogger("himeval").setLevel(logging.DEBUG)
     for noisy in ("httpx", "httpcore", "urllib3", "datasets", "huggingface_hub", "botocore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+
+
+@contextlib.contextmanager
+def _session_log(work: Path) -> Iterator[Path]:
+    """Everything one `himeval run` logs (ours at DEBUG, other libraries' warnings) goes to
+    `<work>/logs/<timestamp>.log`, including tracebacks the console only summarises."""
+    from .runner import LOG_FORMAT
+
+    logs = work / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    path = logs / f"run-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.log"
+    handler = logging.FileHandler(path, encoding="utf-8")
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    handler.addFilter(lambda r: r.name.startswith("himeval") or r.levelno >= logging.WARNING)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        yield path
+    finally:
+        root.removeHandler(handler)
+        handler.close()
+
+
+@contextlib.contextmanager
+def _graceful_signals() -> Iterator[None]:
+    """SIGTERM (docker stop, a hosted job being preempted) and SIGHUP (a dropped SSH
+    session) stop a run the way Ctrl-C does: in-flight answers are saved, the run resumes."""
+    def stop(signum: int, _frame: Any) -> None:
+        raise KeyboardInterrupt(signal.Signals(signum).name)
+
+    names = [n for n in ("SIGTERM", "SIGHUP") if hasattr(signal, n)]
+    try:
+        previous = {n: signal.signal(getattr(signal, n), stop) for n in names}
+    except ValueError:  # not the main thread (embedded use): leave signals alone
+        previous = {}
+    try:
+        yield
+    finally:
+        for n, handler in previous.items():
+            signal.signal(getattr(signal, n), handler)
 
 
 def _model_args(pairs: list[str]) -> dict[str, Any]:
@@ -116,7 +164,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not args.no_publish:
         store = _store(args.store, required=False)
         if store is None:
-            log.warning("NEPEVAL_STORE not set: results stay local (pass --store or --no-publish)")
+            log.warning("HIMEVAL_STORE not set: results stay local (pass --store or --no-publish)")
 
     vl_settings = None
     vl_classes: dict[str, str] = {}
@@ -135,68 +183,83 @@ def cmd_run(args: argparse.Namespace) -> int:
             log.error("skipping %d VLMEvalKit benchmarks: %s", len(vl_benches), exc)
             vl_settings = None
 
-    summary: list[dict[str, Any]] = []
-    failed = 0
-    for model_entry in model_entries:
-        for bench in bench_entries:
-            row: dict[str, Any] = {"model": model_entry.info.id, "benchmark": bench.info.id}
-            try:
-                if bench.engine == "native":
-                    run_dir = infer(model_entry, bench, work, model_overrides=overrides,
-                                    options=RunOptions(limit=args.limit, seed=args.seed,
-                                                       concurrency=args.concurrency,
-                                                       retry_errors=not args.no_retry_errors))
-                    result = evaluate(run_dir, bench)
-                else:
-                    if vl_settings is None:
-                        row["status"] = "skipped (VLMEvalKit unavailable)"
-                        summary.append(row)
-                        continue
-                    if args.limit:
-                        log.warning("--limit does not apply to VLMEvalKit benchmarks "
-                                    "(they run their full or MINI split)")
-                    from .engines.vlmevalkit import run_benchmark
-                    from .runner import RESULT, _write_json
+    with _session_log(work) as session_log, _graceful_signals():
+        log.info("himalaya-vlm-eval %s: %d model(s) × %d benchmark(s); log: %s",
+                 __version__, len(model_entries), len(bench_entries), session_log)
+        summary: list[dict[str, Any]] = []
+        failed = 0
+        interrupted = False
+        for model_entry in model_entries:
+            if interrupted:
+                break
+            for bench in bench_entries:
+                row: dict[str, Any] = {"model": model_entry.info.id, "benchmark": bench.info.id}
+                log.info("━━ %s × %s (%d/%d)", model_entry.info.id, bench.info.id,
+                         len(summary) + 1, len(model_entries) * len(bench_entries))
+                try:
+                    if bench.engine == "native":
+                        run_dir = infer(model_entry, bench, work, model_overrides=overrides,
+                                        options=RunOptions(limit=args.limit, seed=args.seed,
+                                                           concurrency=args.concurrency,
+                                                           retry_errors=not args.no_retry_errors))
+                        result = evaluate(run_dir, bench)
+                    else:
+                        if vl_settings is None:
+                            row["status"] = "skipped (VLMEvalKit unavailable)"
+                            summary.append(row)
+                            continue
+                        if args.limit:
+                            log.warning("--limit does not apply to VLMEvalKit benchmarks "
+                                        "(they run their full or MINI split)")
+                        from .engines.vlmevalkit import run_benchmark
+                        from .runner import RESULT, _write_json
 
-                    result = run_benchmark(model_entry, bench, work, vl_settings,
-                                           model_overrides=overrides,
-                                           dataset_class=vl_classes.get(bench.spec["vlmeval"]["dataset"]))
-                    run_dir = work / "runs" / result.run_id
-                    run_dir.mkdir(parents=True, exist_ok=True)
-                    _write_json(run_dir / RESULT, json.loads(result.model_dump_json()))
-                p = result.primary
-                ci = f" [{p.ci_low:.4g}, {p.ci_high:.4g}]" if p.ci_low is not None else ""
-                row.update(score=f"{p.value:.4g}{ci}", cases=result.cases, errors=result.errors)
-                if store is not None:
-                    try:
-                        _, status = publish_run(run_dir, store, max_error_rate=args.max_error_rate)
-                        row["status"] = status
-                    except PublishRefused as exc:
-                        row["status"] = "not published"
-                        log.error("%s", exc)
-                else:
-                    row["status"] = "local"
-                row["run"] = str(run_dir)
-            except Unsupported as exc:
-                row["status"] = "skipped"
-                log.info("skip: %s", exc)
-            except DataUnavailable as exc:
-                row["status"] = "skipped (no data)"
-                log.warning("skip %s: %s", bench.info.id, exc)
-            except (RunAborted, KeyboardInterrupt) as exc:
-                failed += 1
-                row["status"] = "aborted"
-                log.error("%s × %s aborted: %s", model_entry.info.id, bench.info.id, exc)
-                if isinstance(exc, KeyboardInterrupt):
-                    summary.append(row)
-                    break
-            except Exception as exc:  # one pair failing never stops the matrix
-                failed += 1
-                row["status"] = "failed"
-                log.error("%s × %s failed: %s: %s", model_entry.info.id, bench.info.id,
-                          type(exc).__name__, exc)
-                log.debug("traceback", exc_info=True)
-            summary.append(row)
+                        result = run_benchmark(model_entry, bench, work, vl_settings,
+                                               model_overrides=overrides,
+                                               dataset_class=vl_classes.get(bench.spec["vlmeval"]["dataset"]))
+                        run_dir = work / "runs" / result.run_id
+                        run_dir.mkdir(parents=True, exist_ok=True)
+                        _write_json(run_dir / RESULT, json.loads(result.model_dump_json()))
+                    p = result.primary
+                    ci = f" [{p.ci_low:.4g}, {p.ci_high:.4g}]" if p.ci_low is not None else ""
+                    row.update(score=f"{p.value:.4g}{ci}", cases=result.cases, errors=result.errors)
+                    if store is not None:
+                        try:
+                            _, status = publish_run(
+                                run_dir, store, max_error_rate=args.max_error_rate)
+                            row["status"] = status
+                        except PublishRefused as exc:
+                            row["status"] = "not published"
+                            log.error("%s", exc)
+                    else:
+                        row["status"] = "local"
+                    row["run"] = str(run_dir)
+                except Unsupported as exc:
+                    row["status"] = "skipped"
+                    log.info("skip: %s", exc)
+                except DataUnavailable as exc:
+                    row["status"] = "skipped (no data)"
+                    log.warning("skip %s: %s", bench.info.id, exc)
+                except (RunAborted, KeyboardInterrupt) as exc:
+                    failed += 1
+                    row["status"] = "aborted"
+                    log.error("%s × %s aborted: %s", model_entry.info.id, bench.info.id,
+                              str(exc) or "interrupted")
+                    if isinstance(exc, KeyboardInterrupt):
+                        interrupted = True
+                        summary.append(row)
+                        break
+                except Exception as exc:  # one pair failing never stops the matrix
+                    failed += 1
+                    row["status"] = "failed"
+                    log.error("%s × %s failed: %s: %s", model_entry.info.id, bench.info.id,
+                              type(exc).__name__, exc)
+                    log.debug("traceback for %s × %s", model_entry.info.id, bench.info.id,
+                              exc_info=True)
+                summary.append(row)
+        if interrupted:
+            log.warning("interrupted: finished pairs are kept%s; re-run the same command "
+                        "to resume the rest", " and published" if store is not None else "")
     print()
     _table(summary, ["model", "benchmark", "score", "cases", "errors", "status"])
     return 1 if failed else 0
@@ -283,9 +346,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="nepeval", description=__doc__,
+    p = argparse.ArgumentParser(prog="himeval", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--version", action="version", version=f"nepeval-ocr {__version__}")
+    p.add_argument("--version", action="version", version=f"himalaya-vlm-eval {__version__}")
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -306,8 +369,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--concurrency", type=int)
     s.add_argument("--model-arg", action="append", default=[], metavar="KEY=VALUE",
                    help="override an adapter parameter (YAML value), repeatable")
-    s.add_argument("--work-dir", default=os.environ.get("NEPEVAL_WORK_DIR", "results"))
-    s.add_argument("--store", help="result store (default $NEPEVAL_STORE)")
+    s.add_argument("--work-dir", default=os.environ.get("HIMEVAL_WORK_DIR", "results"))
+    s.add_argument("--store", help="result store (default $HIMEVAL_STORE)")
     s.add_argument("--no-publish", action="store_true")
     s.add_argument("--max-error-rate", type=float, default=0.05)
     s.add_argument("--no-retry-errors", action="store_true",
@@ -346,7 +409,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
     s.add_argument("--store")
     s.add_argument("--refresh-seconds", type=float,
-                   default=float(os.environ.get("NEPEVAL_REFRESH_SECONDS", "60")))
+                   default=float(os.environ.get("HIMEVAL_REFRESH_SECONDS", "60")))
     s.set_defaults(func=cmd_serve)
     return p
 

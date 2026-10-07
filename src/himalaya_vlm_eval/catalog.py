@@ -1,7 +1,7 @@
 """Model and benchmark catalogs, loaded from YAML.
 
-Built-in entries ship in `nepeval_ocr/catalog/`. Extra directories can be added with
-`NEPEVAL_CATALOG=/path/a:/path/b`; each may hold `models/*.yaml` and `benchmarks/*.yaml`.
+Built-in entries ship in `himalaya_vlm_eval/catalog/`. Extra directories can be added with
+`HIMEVAL_CATALOG=/path/a:/path/b`; each may hold `models/*.yaml` and `benchmarks/*.yaml`.
 A later entry with the same id overrides an earlier one, so a deployment can retune a
 preset without forking.
 
@@ -53,7 +53,7 @@ class BenchmarkEntry:
 
 def _catalog_dirs() -> list[Path]:
     dirs = [BUILTIN_DIR]
-    for part in os.environ.get("NEPEVAL_CATALOG", "").split(os.pathsep):
+    for part in os.environ.get("HIMEVAL_CATALOG", "").split(os.pathsep):
         if part.strip():
             dirs.append(Path(part).expanduser())
     return dirs
@@ -128,7 +128,7 @@ _PROVIDERS: dict[str, dict[str, Any]] = {
     "openai": {"base_url": "https://api.openai.com/v1", "api_key_env": ["OPENAI_API_KEY"]},
     "tarka": {
         "base_url": "https://tarka.rest/v1",
-        "api_key_env": ["TARKA_API_KEY", "NEPEVAL_API_TOKEN"],
+        "api_key_env": ["TARKA_API_KEY", "HIMEVAL_API_TOKEN"],
     },
     "vllm": {"base_url": None, "api_key_env": None},
 }
@@ -155,7 +155,7 @@ def resolve_model(name: str) -> ModelEntry:
         close = [m for m in catalog if name.lower() in m][:8]
         hint = f" Did you mean: {', '.join(close)}?" if close else ""
         raise KeyError(
-            f"unknown model {name!r}. Use a catalog id (`nepeval list models`) or "
+            f"unknown model {name!r}. Use a catalog id (`himeval list models`) or "
             f"provider:model with provider in {sorted(_PROVIDERS)}.{hint}"
         )
     params: dict[str, Any] = {"model": model, **_PROVIDERS[provider]}
@@ -179,7 +179,7 @@ def resolve_benchmark(name: str) -> BenchmarkEntry:
     lowered = {k.lower(): k for k in catalog}
     if name.lower() in lowered:
         return catalog[lowered[name.lower()]]
-    raise KeyError(f"unknown benchmark {name!r}; see `nepeval list benchmarks`")
+    raise KeyError(f"unknown benchmark {name!r}; see `himeval list benchmarks`")
 
 
 def select_benchmarks(spec: str) -> list[BenchmarkEntry]:

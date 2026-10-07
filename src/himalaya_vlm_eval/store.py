@@ -6,7 +6,7 @@ Layout, identical for a local directory and an S3 prefix:
     runs/<run_id>/samples.jsonl.gz   per-sample prediction, references and scores (measured runs)
 
 Results are immutable: a run id is never overwritten with different content. Select the
-store with NEPEVAL_STORE: a path, file:///path, or s3://bucket/prefix (needs the `s3`
+store with HIMEVAL_STORE: a path, file:///path, or s3://bucket/prefix (needs the `s3`
 extra; S3-compatible endpoints via AWS_ENDPOINT_URL).
 """
 
@@ -89,7 +89,8 @@ class S3Store:
         try:
             import boto3
         except ImportError as exc:
-            raise StoreError("S3 store needs the s3 extra: pip install 'nepeval-ocr[s3]'") from exc
+            raise StoreError(
+                "S3 store needs the s3 extra: pip install 'himalaya-vlm-eval[s3]'") from exc
         self.bucket, self.prefix = bucket, prefix.strip("/")
         self.url = f"s3://{bucket}/{self.prefix}" if self.prefix else f"s3://{bucket}"
         self._s3 = boto3.client("s3", endpoint_url=os.environ.get("AWS_ENDPOINT_URL") or None)
@@ -127,9 +128,9 @@ class S3Store:
 
 
 def open_store(url: str | None = None) -> Store:
-    url = url or os.environ.get("NEPEVAL_STORE")
+    url = url or os.environ.get("HIMEVAL_STORE")
     if not url:
-        raise StoreError("no result store: set NEPEVAL_STORE (a path or s3://bucket/prefix)")
+        raise StoreError("no result store: set HIMEVAL_STORE (a path or s3://bucket/prefix)")
     if url.startswith("s3://"):
         bucket, _, prefix = url[5:].partition("/")
         return S3Store(bucket, prefix)

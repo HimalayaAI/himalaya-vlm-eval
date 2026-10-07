@@ -13,13 +13,16 @@ from __future__ import annotations
 
 import collections
 import concurrent.futures as cf
+import contextlib
 import hashlib
 import json
 import logging
 import os
 import platform
+import re
 import statistics
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -32,12 +35,13 @@ from .catalog import BenchmarkEntry, ModelEntry
 from .models.base import FatalModelError, Model, ModelError
 from .schema import MetricValue, RunResult, SourceInfo, utcnow
 
-log = logging.getLogger("nepeval")
+log = logging.getLogger("himeval")
 
 PREDICTIONS = "predictions.jsonl"
 SCORES = "scores.jsonl"
 RUN_META = "run.json"
 RESULT = "result.json"
+RUN_LOG = "run.log"
 
 
 class RunAborted(RuntimeError):
@@ -92,6 +96,31 @@ def latest_records(path: Path) -> dict[str, dict[str, Any]]:
     return out
 
 
+LOG_FORMAT = "%(asctime)s %(levelname)-7s [%(threadName)s] %(name)s: %(message)s"
+
+
+@contextlib.contextmanager
+def run_log(run_dir: Path) -> Iterator[None]:
+    """Append everything logged during this run, at DEBUG, to `<run_dir>/run.log`: every
+    sample error, retry and truncation, the config, timings. It lives next to the
+    predictions, so a resumed run continues the same log. The console keeps its level."""
+    handler = logging.FileHandler(run_dir / RUN_LOG, encoding="utf-8")
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    logger = logging.getLogger("himeval")
+    prior = logger.level
+    if logger.getEffectiveLevel() > logging.DEBUG:
+        logger.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.info("── %s (himalaya-vlm-eval %s, pid %d) ──", run_dir.name, __version__, os.getpid())
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(prior)
+        handler.close()
+
+
 # --- stage 1 -----------------------------------------------------------------------------
 
 
@@ -115,7 +144,7 @@ def infer(
     log.info("loading %s …", bench.info.id)
     loaded = bench.load(opts.limit, opts.seed)
     config = {
-        "harness": "nepeval-ocr",
+        "harness": "himalaya-vlm-eval",
         "model": model.describe(),
         "benchmark": bench.describe(),
         "subset": {"limit": opts.limit, "seed": opts.seed, "cases": len(loaded.samples)},
@@ -133,39 +162,66 @@ def infer(
             "benchmark": bench.info.model_dump(mode="json"),
             "started_at": utcnow().isoformat(),
             "environment": {
-                "nepeval_ocr": __version__,
+                "himalaya_vlm_eval": __version__,
                 "python": platform.python_version(),
                 "platform": platform.platform(),
             },
         }
         _write_json(meta_path, meta)
 
+    with run_log(run_dir):
+        _infer_run(model, model_entry, bench, loaded, run_dir, config, h, opts)
+    return run_dir
+
+
+def _infer_run(model: Model, model_entry: ModelEntry, bench: NativeBenchmark, loaded: Any,
+               run_dir: Path, config: dict[str, Any], h: str, opts: RunOptions) -> None:
     pred_path = run_dir / PREDICTIONS
     existing = latest_records(pred_path)
     done = {sid for sid, r in existing.items() if r.get("ok") or not opts.retry_errors}
     todo = [s for s in loaded.samples if s.id not in done]
+    retrying = sum(1 for s in todo if s.id in existing)
     # Pre-flight on a sample that has not failed before, so one permanently bad sample
     # (a corrupt image, say) cannot block every resume.
     fresh = next((i for i, s in enumerate(todo) if s.id not in existing), 0)
     if fresh:
         todo.insert(0, todo.pop(fresh))
+    log.debug("config %s: %s", h, json.dumps(config, ensure_ascii=False, default=str))
+    if existing:
+        log.info("resuming %s: %d/%d already done, %d earlier errors to retry",
+                 run_dir.name, len(done), len(loaded.samples), retrying)
     log.info(
         "%s × %s: %d cases, %d done, %d to run → %s",
         model_entry.info.id, bench.info.id, len(loaded.samples), len(done), len(todo), run_dir,
     )
     if not todo:
-        return run_dir
+        return
 
     workers = max(1, opts.concurrency or model.max_concurrency)
+    log.debug("workers=%d max_consecutive_errors=%d", workers, opts.max_consecutive_errors)
+    started = time.monotonic()
+    stats = _PoolStats()
     try:
         model.setup()
         with pred_path.open("a", encoding="utf-8") as out:
-            _preflight(model, bench, todo[0], out)
-            _run_pool(model, bench, todo[1:], out, workers, opts, total=len(loaded.samples),
-                      already=len(done) + 1)
+            _preflight(model, bench, todo[0], out, stats)
+            _run_pool(model, bench, todo[1:], out, workers, opts, stats,
+                      total=len(loaded.samples), already=len(done) + 1)
+    except BaseException as exc:
+        saved = len(done) + stats.completed
+        log.warning("%s stopped (%s) after %s: %d/%d samples saved in %s. "
+                    "Re-run the same command to resume.",
+                    run_dir.name, str(exc) or type(exc).__name__,
+                    _fmt_eta(time.monotonic() - started),
+                    saved, len(loaded.samples), PREDICTIONS)
+        stats.log_errors()
+        raise
     finally:
         model.close()
-    return run_dir
+    log.info("%s × %s inference done in %s: %d run, %d errors, %d retried requests",
+             model_entry.info.id, bench.info.id, _fmt_eta(time.monotonic() - started),
+             stats.completed, stats.errors, stats.retried)
+    stats.log_errors()
 
 
 def _infer_one(model: Model, bench: NativeBenchmark, sample: Any) -> dict[str, Any]:
@@ -203,20 +259,74 @@ def _write_record(out: Any, record: dict[str, Any]) -> None:
     out.flush()
 
 
-def _preflight(model: Model, bench: NativeBenchmark, sample: Any, out: Any) -> None:
+def _sync(out: Any) -> None:
+    """Flush to disk, not just to the OS: a power cut or a killed VM keeps what was saved."""
+    out.flush()
+    try:
+        os.fsync(out.fileno())
+    except (OSError, ValueError):  # not a real file (tests) or already closed
+        pass
+
+
+class _PoolStats:
+    """Counts and error log for one inference pass. Only the main thread touches it."""
+
+    loud_errors = 5  # first N errors go to the console; all of them go to run.log
+
+    def __init__(self) -> None:
+        self.completed = self.errors = self.retried = self.consecutive = 0
+        self.kinds: collections.Counter[str] = collections.Counter()
+
+    def add(self, record: dict[str, Any]) -> None:
+        self.completed += 1
+        if ((record.get("extra") or {}).get("attempts") or 1) > 1:
+            self.retried += 1
+        if record["ok"]:
+            self.consecutive = 0
+            log.debug("ok %s (%.2fs, finish=%s)", record["sample_id"],
+                      record.get("latency_s") or 0, record.get("finish_reason"))
+            if record.get("finish_reason") == "length":
+                log.debug("truncated output on %s (hit max_tokens)", record["sample_id"])
+            return
+        self.errors += 1
+        self.consecutive += 1
+        self.kinds[_error_kind(record["error"])] += 1
+        level = logging.WARNING if self.errors <= self.loud_errors else logging.DEBUG
+        log.log(level, "error on %s: %s", record["sample_id"], record["error"])
+        if self.errors == self.loud_errors:
+            log.warning("further per-sample errors are logged to %s only", RUN_LOG)
+
+    def log_errors(self) -> None:
+        if self.kinds:
+            log.info("errors by kind: %s", "; ".join(
+                f"{n}× {kind}" for kind, n in self.kinds.most_common(5)))
+
+
+def _error_kind(error: str) -> str:
+    """Group errors that differ only in ids, numbers or response bodies."""
+    head = error.split(":", 2)
+    kind = ":".join(head[:2]) if error.startswith(("HTTP", "gave up")) else head[0]
+    return re.sub(r"\d+(\.\d+)?", "N", kind)[:120]
+
+
+def _preflight(model: Model, bench: NativeBenchmark, sample: Any, out: Any,
+               stats: _PoolStats) -> None:
     """One sample, synchronously, before fanning out: a broken adapter or key fails in
     seconds instead of after thousands of identical errors."""
+    log.info("pre-flight on %s …", sample.id)
     record = _infer_one(model, bench, sample)
     if not record["ok"]:
         raise RunAborted(f"pre-flight failed on {sample.id}: {record['error']}")
     _write_record(out, record)
+    stats.add(record)
     log.info("pre-flight ok (%.1fs)", record["latency_s"])
 
 
 def _run_pool(model: Model, bench: NativeBenchmark, samples: list[Any], out: Any,
-              workers: int, opts: RunOptions, *, total: int, already: int) -> None:
+              workers: int, opts: RunOptions, stats: _PoolStats, *, total: int,
+              already: int) -> None:
     started = last_report = time.monotonic()
-    completed, errors, consecutive = 0, 0, 0
+    base = stats.completed  # the pre-flight sample is already counted
     pending: set[cf.Future] = set()
     it = iter(samples)
     with cf.ThreadPoolExecutor(max_workers=workers, thread_name_prefix="infer") as pool:
@@ -234,31 +344,47 @@ def _run_pool(model: Model, bench: NativeBenchmark, samples: list[Any], out: Any
                 for fut in finished:
                     record = fut.result()  # FatalModelError propagates
                     _write_record(out, record)
-                    completed += 1
-                    if record["ok"]:
-                        consecutive = 0
-                    else:
-                        errors += 1
-                        consecutive += 1
-                        log.debug("error on %s: %s", record["sample_id"], record["error"])
-                        if consecutive >= opts.max_consecutive_errors:
-                            raise RunAborted(
-                                f"{consecutive} consecutive errors; last: {record['error']}"
-                            )
+                    stats.add(record)
+                    if stats.consecutive >= opts.max_consecutive_errors:
+                        raise RunAborted(
+                            f"{stats.consecutive} consecutive errors; last: {record['error']}"
+                        )
                 now = time.monotonic()
                 if now - last_report >= opts.progress_every_s or not pending:
                     last_report = now
-                    rate = completed / max(now - started, 1e-9)
-                    left = len(samples) - completed
+                    _sync(out)
+                    done = stats.completed - base
+                    rate = done / max(now - started, 1e-9)
+                    left = len(samples) - done
+                    count = already - 1 + stats.completed
                     log.info(
-                        "  %d/%d  %.2f/s  eta %s  errors %d",
-                        already + completed, total, rate,
-                        _fmt_eta(left / rate if rate else 0), errors,
+                        "  %d/%d (%d%%)  %.2f/s  eta %s  errors %d  retried %d",
+                        count, total, 100 * count // max(total, 1), rate,
+                        _fmt_eta(left / rate if rate else 0), stats.errors, stats.retried,
                     )
         except BaseException:
-            for fut in pending:
-                fut.cancel()
+            _drain(pending, out, stats)
             raise
+        finally:
+            _sync(out)
+
+
+def _drain(pending: set[cf.Future], out: Any, stats: _PoolStats) -> None:
+    """On interrupt or abort, keep the answers already paid for: requests that are in
+    flight finish and are saved; queued ones are dropped (the resume runs them)."""
+    running = {f for f in pending if not f.cancel()}
+    if not running:
+        return
+    log.warning("saving %d in-flight requests before stopping (Ctrl-C again to drop them)",
+                len(running))
+    try:
+        for fut in cf.as_completed(running):
+            if fut.exception() is None:
+                record = fut.result()
+                _write_record(out, record)
+                stats.add(record)
+    except KeyboardInterrupt:
+        log.warning("dropped in-flight requests; they will run on resume")
 
 
 def _fmt_eta(seconds: float) -> str:
@@ -271,10 +397,21 @@ def _fmt_eta(seconds: float) -> str:
 # --- stage 2 -----------------------------------------------------------------------------
 
 
+def _harness_version(env: dict) -> str:
+    # runs saved before the rename recorded the package as `nepeval_ocr`
+    return env.get("himalaya_vlm_eval") or env.get("nepeval_ocr", "unknown")
+
+
 def evaluate(run_dir: Path, bench_entry: BenchmarkEntry | None = None,
              *, n_resamples: int = 1000) -> RunResult:
     """Score a run directory and write result.json. `bench_entry` defaults to the catalog
     entry with the run's benchmark id, so improved scorers apply to old predictions."""
+    with run_log(run_dir):
+        return _evaluate(run_dir, bench_entry, n_resamples)
+
+
+def _evaluate(run_dir: Path, bench_entry: BenchmarkEntry | None,
+              n_resamples: int) -> RunResult:
     from .catalog import resolve_benchmark
     from .schema import BenchmarkInfo, ModelInfo
 
@@ -304,6 +441,8 @@ def evaluate(run_dir: Path, bench_entry: BenchmarkEntry | None = None,
         try:
             prior = load_result(run_dir)
             if prior.run_id == run_id:
+                log.info("%s: predictions and scoring unchanged; keeping result.json",
+                         run_dir.name)
                 return prior
         except Exception:  # unreadable or old schema: just re-evaluate
             pass
@@ -343,8 +482,8 @@ def evaluate(run_dir: Path, bench_entry: BenchmarkEntry | None = None,
         created_at=utcnow(),
         model=model_info,
         benchmark=BenchmarkInfo(**{**meta["benchmark"], **entry.info.model_dump()}),
-        source=SourceInfo(kind="measured", harness="nepeval-ocr",
-                          harness_version=meta["environment"]["nepeval_ocr"]),
+        source=SourceInfo(kind="measured", harness="himalaya-vlm-eval",
+                          harness_version=_harness_version(meta["environment"])),
         cases=len(per_sample),
         errors=errors,
         metrics=metric_values,
@@ -354,7 +493,15 @@ def evaluate(run_dir: Path, bench_entry: BenchmarkEntry | None = None,
         has_samples=True,
     )
     _write_json(run_dir / RESULT, json.loads(result.model_dump_json()))
+    p = result.primary
+    log.info("scored %s: %s = %.4g [%s, %s] over %d samples, %d errors, %d truncated",
+             run_dir.name, primary, p.value, _g(p.ci_low), _g(p.ci_high), result.cases,
+             result.errors, result.stats.get("truncated", 0))
     return result
+
+
+def _g(x: float | None) -> str:
+    return "—" if x is None else f"{x:.4g}"
 
 
 def _group_values(value: Any) -> list[str]:

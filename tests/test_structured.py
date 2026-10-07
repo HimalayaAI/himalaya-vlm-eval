@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from nepeval_ocr import structured as S
+from himalaya_vlm_eval import structured as S
 
 # --- key-value ---------------------------------------------------------------------------
 

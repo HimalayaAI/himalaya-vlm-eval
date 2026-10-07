@@ -15,7 +15,7 @@ local manifest, fully described by a catalog YAML entry.
       question: null                # vqa only
       meta: [level, font_name]      # carried into predictions, used for breakdowns
     prompt: "Transcribe …"          # `{question}` is substituted for vqa
-    metrics: [cer, wer, …]          # names from nepeval_ocr.metrics
+    metrics: [cer, wer, …]          # names from himalaya_vlm_eval.metrics
     breakdowns: [level, font_name]
 
 A local dataset is a JSONL manifest; `image` paths resolve relative to it:

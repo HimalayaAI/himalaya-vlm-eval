@@ -1,23 +1,39 @@
-# nepeval-ocr
+# himalaya-vlm-eval
 
 Benchmark harness and results API for vision-language and OCR models — Nepali-first,
 with the standard OCR, document, chart, math, chat and general suites alongside.
 
-- **Run** any model on any benchmark: `nepeval run --model gpt-4o,glm-ocr-nepali --bench nepalipixel,category:math`
+- **Run** any model on any benchmark: `himeval run --model gpt-4o,glm-ocr-nepali --bench nepalipixel,category:math`
 - **Publish** automatically to a result store (local directory or S3) when a run finishes.
 - **Serve** the results as a read-only leaderboard API that HimalayaAI Studio proxies.
 
 ```
  runner (GPU box, laptop, CI)           result store                 results API              studio
 ┌───────────────────────────┐  publish ┌──────────────────┐  read  ┌──────────────────┐ HTTP ┌─────────────┐
-│ nepeval run               │ ───────▶ │ runs/<id>/        │ ◀───── │ nepeval serve    │ ◀─── │ backend     │
+│ himeval run               │ ───────▶ │ runs/<id>/        │ ◀───── │ himeval serve    │ ◀─── │ backend     │
 │  native engine (Nepali,   │          │   result.json     │        │ /v1/leaderboard  │      │ proxies /v1 │
 │   docs, OCR engines)      │          │   samples.jsonl.gz│        │ /v1/runs/…       │      └─────────────┘
 │  VLMEvalKit engine (std.  │          └──────────────────┘        └──────────────────┘
-│   suites, OpenCompass-    │   nepeval import ──▶ (numbers from other leaderboards)
+│   suites, OpenCompass-    │   himeval import ──▶ (numbers from other leaderboards)
 │   comparable)             │
 └───────────────────────────┘
 ```
+
+## Renamed from nepeval-ocr
+
+| | Before | Now |
+|---|---|---|
+| Distribution | `nepeval-ocr` | `himalaya-vlm-eval` |
+| Python package | `nepeval_ocr` | `himalaya_vlm_eval` |
+| Command | `nepeval` | `himeval` |
+| API image | `ghcr.io/himalayaai/nepeval-api` | `ghcr.io/himalayaai/himalaya-vlm-eval-api` |
+| Environment | `NEPEVAL_*` (`NEPEVAL_STORE`, …) | `HIMEVAL_*` (`HIMEVAL_STORE`, …) |
+| Adapter entry points | `nepeval_ocr.adapters` | `himalaya_vlm_eval.adapters` |
+
+Published results keep working: the store layout and `result.json` schema are unchanged,
+and `himeval eval` re-scores run directories saved under the old name. A run started
+before the rename does not resume under `himeval run` (its config hash names the harness),
+so it starts fresh.
 
 ## Install
 
@@ -32,15 +48,15 @@ Extras keep each deployment small: the API needs only the core plus `api` (and `
 ## Run a benchmark
 
 ```bash
-export NEPEVAL_STORE=s3://nepeval-results          # or a directory; omit to keep results local
+export HIMEVAL_STORE=s3://himalaya-vlm-eval-results          # or a directory; omit to keep results local
 export OPENROUTER_API_KEY=… TARKA_API_KEY=…
 
-nepeval list benchmarks                             # 37 benchmarks, 7 categories
-nepeval list models                                 # presets; anything else works ad hoc
+himeval list benchmarks                             # 37 benchmarks, 7 categories
+himeval list models                                 # presets; anything else works ad hoc
 
-nepeval run --model glm-ocr-nepali,gpt-4o,easyocr-ne --bench nepalipixel --limit 2000
-nepeval run --model openrouter:qwen/qwen3-vl-8b-instruct --bench category:document
-nepeval run --model vllm:Qwen/Qwen2.5-VL-7B-Instruct --bench nepalipixel   # VLLM_BASE_URL
+himeval run --model glm-ocr-nepali,gpt-4o,easyocr-ne --bench nepalipixel --limit 2000
+himeval run --model openrouter:qwen/qwen3-vl-8b-instruct --bench category:document
+himeval run --model vllm:Qwen/Qwen2.5-VL-7B-Instruct --bench nepalipixel   # VLLM_BASE_URL
 ```
 
 What `run` does, per model × benchmark:
@@ -54,22 +70,47 @@ What `run` does, per model × benchmark:
 4. **Re-running the same command resumes** — successes are kept, failures retried.
 5. Scores into `result.json`: every metric, a bootstrap 95% CI on the headline metric,
    breakdowns (by level, font, document type …), latency, token use, truncations.
-6. **Publishes** to `NEPEVAL_STORE` unless more than 5% of samples errored
+6. **Publishes** to `HIMEVAL_STORE` unless more than 5% of samples errored
    (`--max-error-rate`). Errors are scored as worst-case, never dropped.
 
 One failing pair never stops the matrix; a summary table prints at the end.
 
+### Logs and resuming
+
+| Where | What |
+|---|---|
+| console | progress every 15 s (done/total, rate, ETA, errors, retried requests), the first 5 sample errors, an error summary by kind, the score with its CI |
+| `results/runs/<run>/run.log` | everything for that run at DEBUG: the full config, every sample's outcome and latency, every error and adapter retry with its reason, truncations, timings; appended across resumes |
+| `results/logs/run-<time>-<pid>.log` | the whole `himeval run` session, including tracebacks the console only summarises |
+| `results/vlmevalkit/<model>__<dataset>.log` | VLMEvalKit's own output; the console gets a heartbeat with its latest line every minute |
+
+`-v` shows the DEBUG lines on the console too.
+
+A run can be stopped at any point — Ctrl-C, `kill`, `docker stop`, a preempted cloud GPU,
+a dropped SSH session (SIGINT, SIGTERM and SIGHUP are all handled) — and **re-running the
+same command continues where it stopped**:
+
+- every answer is appended to `predictions.jsonl` as it arrives and synced to disk at
+  each progress report; a line torn by a hard kill is skipped on read;
+- on a stop, requests already in flight finish and are saved (a second Ctrl-C drops
+  them); queued samples are not started;
+- the run directory is keyed by a hash of model, parameters, benchmark and subset, so the
+  same command finds it; earlier errors are retried (`--no-retry-errors` keeps them);
+- in a matrix, finished pairs are skipped (their result is reused, publishing is
+  idempotent) and the stopped pair resumes;
+- VLMEvalKit runs use its `--reuse`, so its saved predictions are picked up the same way.
+
 | Command | |
 |---|---|
-| `nepeval eval <run_dir>` | re-score saved predictions (after a scorer change) |
-| `nepeval publish <run_dir>` | publish a run evaluated earlier or elsewhere |
-| `nepeval import results.json` | publish numbers from another leaderboard (`--format-help`) |
-| `nepeval leaderboard <bench>` | print a board from the store |
-| `nepeval serve` | the results API |
+| `himeval eval <run_dir>` | re-score saved predictions (after a scorer change) |
+| `himeval publish <run_dir>` | publish a run evaluated earlier or elsewhere |
+| `himeval import results.json` | publish numbers from another leaderboard (`--format-help`) |
+| `himeval leaderboard <bench>` | print a board from the store |
+| `himeval serve` | the results API |
 
 ## Benchmarks
 
-| Category | Native (nepeval) | VLMEvalKit |
+| Category | Native (himeval) | VLMEvalKit |
 |---|---|---|
 | OCR | `nepalipixel`, `nepalipixel-docs-page` | OCRBench, OCRBench v2 (EN/ZH), CC-OCR, olmOCR-Bench, TextVQA |
 | Document | `nepalipixel-docs-kv`, `-qa`, `-layout` | DocVQA, InfographicVQA, OmniDocBench |
@@ -79,7 +120,7 @@ One failing pair never stops the matrix; a summary table prints at the end.
 | General | | MMMU, MMBench v1.1, MMStar, RealWorldQA, BLINK, MME |
 | Hallucination | | HallusionBench, POPE |
 
-**Native benchmarks** are YAML (`src/nepeval_ocr/catalog/benchmarks/`). A new OCR or
+**Native benchmarks** are YAML (`src/himalaya_vlm_eval/catalog/benchmarks/`). A new OCR or
 short-answer VQA set is a file, no code:
 
 ```yaml
@@ -95,7 +136,7 @@ prompt: Transcribe all text in this image exactly as written.
 metrics: [char_accuracy, cer, wer, exact_match]
 ```
 
-Extra catalog directories load from `NEPEVAL_CATALOG=/path/a:/path/b` and override
+Extra catalog directories load from `HIMEVAL_CATALOG=/path/a:/path/b` and override
 built-ins by id.
 
 **NepaliPixel document benchmarks** read a nepal-pixel-synthesis output directory
@@ -109,7 +150,7 @@ OpenCompass leaderboard's method. Setup and the judge model: [docs/VLMEVALKIT.md
 
 ## Models
 
-Presets live in `src/nepeval_ocr/catalog/models/`: Himalaya models on Tarka
+Presets live in `src/himalaya_vlm_eval/catalog/models/`: Himalaya models on Tarka
 (`glm-ocr-nepali` via `/ocr`, `himalaya-gemma-4-*` via chat), GPT, Gemini, Claude, Qwen-VL,
 Llama 4, Mistral, GLM-4.5V via OpenRouter, and Tesseract, EasyOCR, PaddleOCR, Surya,
 TrOCR in-process. Anything else, ad hoc:
@@ -123,16 +164,16 @@ TrOCR in-process. Anything else, ad hoc:
 
 Override any adapter parameter: `--model-arg max_tokens=8192 --model-arg max_image_side=2048`.
 A new kind of backend is a `Model` subclass registered with `@register_adapter("name")` or
-the `nepeval_ocr.adapters` entry-point group.
+the `himalaya_vlm_eval.adapters` entry-point group.
 
 ## Results API
 
-`nepeval serve` (or the `ghcr.io/himalayaai/nepeval-api` image) serves the store
+`himeval serve` (or the `ghcr.io/himalayaai/himalaya-vlm-eval-api` image) serves the store
 read-only. Internal by design — the studio backend proxies it. Contract:
 [docs/API.md](docs/API.md); studio wiring: [docs/STUDIO_INTEGRATION.md](docs/STUDIO_INTEGRATION.md).
 
 ```bash
-NEPEVAL_STORE=s3://nepeval-results nepeval serve --port 8000
+HIMEVAL_STORE=s3://himalaya-vlm-eval-results himeval serve --port 8000
 curl localhost:8000/v1/leaderboard/nepalipixel
 ```
 

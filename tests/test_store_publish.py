@@ -2,11 +2,11 @@ import json
 
 import pytest
 
-from nepeval_ocr import catalog
-from nepeval_ocr.publish import PublishRefused, build_imported, import_file, publish_run
-from nepeval_ocr.runner import evaluate, infer
-from nepeval_ocr.schema import RunResult
-from nepeval_ocr.store import (
+from himalaya_vlm_eval import catalog
+from himalaya_vlm_eval.publish import PublishRefused, build_imported, import_file, publish_run
+from himalaya_vlm_eval.runner import evaluate, infer
+from himalaya_vlm_eval.schema import RunResult
+from himalaya_vlm_eval.store import (
     LocalStore,
     S3Store,
     StoredObject,
@@ -32,9 +32,9 @@ def test_local_store_roundtrip_and_listing(tmp_path):
 
 
 def test_open_store_from_env(tmp_path, monkeypatch):
-    with pytest.raises(StoreError, match="NEPEVAL_STORE"):
+    with pytest.raises(StoreError, match="HIMEVAL_STORE"):
         open_store()
-    monkeypatch.setenv("NEPEVAL_STORE", f"file://{tmp_path}")
+    monkeypatch.setenv("HIMEVAL_STORE", f"file://{tmp_path}")
     assert isinstance(open_store(), LocalStore)
 
 
@@ -66,7 +66,7 @@ def test_publish_run_with_samples_and_gate(tmp_path, manifest_catalog):
 
 
 def test_publish_refuses_high_error_rate(tmp_path, manifest_catalog):
-    from nepeval_ocr.runner import RunOptions
+    from himalaya_vlm_eval.runner import RunOptions
 
     bench = catalog.resolve_benchmark("local-ocr")
     run_dir = infer(entry("error_second", concurrency=1), bench, tmp_path / "w",
@@ -136,10 +136,10 @@ class FakeS3:
 
 def test_s3_store_with_prefix():
     s = S3Store.__new__(S3Store)
-    s.bucket, s.prefix, s.url, s._s3 = "b", "nepeval", "s3://b/nepeval", FakeS3()
+    s.bucket, s.prefix, s.url, s._s3 = "b", "himeval", "s3://b/himeval", FakeS3()
     r = result("m", "b", 1.0)
     assert publish_result(s, r) == "published"
-    assert "nepeval/runs/" + r.run_id + "/result.json" in s._s3.objects
+    assert "himeval/runs/" + r.run_id + "/result.json" in s._s3.objects
     listed = list(s.list("runs/"))
     assert listed[0].key == f"runs/{r.run_id}/result.json"
     assert isinstance(listed[0], StoredObject)

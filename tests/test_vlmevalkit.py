@@ -2,13 +2,16 @@
 output layout (status.json, TSV predictions, per-dataset score files)."""
 
 import json
+import logging
+import os
 import sys
 import textwrap
+import time
 
 import pytest
 
-from nepeval_ocr import catalog
-from nepeval_ocr.engines import vlmevalkit as V
+from himalaya_vlm_eval import catalog
+from himalaya_vlm_eval.engines import vlmevalkit as V
 
 FAKE_RUN = textwrap.dedent(r'''
     import argparse, json, os, sys, time
@@ -150,7 +153,7 @@ def test_unsupported_dataset_and_failure_surface(fake_repo, tmp_path, monkeypatc
 
 
 def test_rejects_non_chat_adapters(fake_repo, tmp_path):
-    from nepeval_ocr.runner import Unsupported
+    from himalaya_vlm_eval.runner import Unsupported
 
     with pytest.raises(Unsupported, match="chat-completions"):
         V.run_benchmark(catalog.models()["glm-ocr-nepali"], catalog.resolve_benchmark("ocrbench"),
@@ -169,3 +172,36 @@ def test_parse_helpers(tmp_path):
     # glob metacharacters in the model alias must not break file lookup
     (tmp_path / "m[1]_X_acc.csv").write_text('"Overall"\n"0.5"\n')
     assert V.parse_score(tmp_path, {"files": ["{P}_acc.csv"], "column": "Overall"}, "m[1]_X")[0] == 0.5
+
+
+def test_streaming_logs_heartbeats_and_stops_the_child(tmp_path, caplog, monkeypatch):
+    s = V.VLMEvalSettings(repo=tmp_path, python=sys.executable)
+    log_path = tmp_path / "out.log"
+    script = ("import time\nfor i in range(3):\n"
+              "    print(f'Infer {i}/3', flush=True)\n    time.sleep(0.2)")
+    with caplog.at_level(logging.INFO, logger="himeval"):
+        rc = V._run_streaming([sys.executable, "-c", script], s, {}, log_path, label="m × d",
+                              heartbeat_s=0.1)
+    assert rc == 0 and "Infer 2/3" in log_path.read_text()
+    assert "vlmevalkit m × d running" in caplog.text
+
+    # An interrupt in the parent terminates the child instead of orphaning it.
+    pid_file = tmp_path / "pid"
+    child = f"import os, time\nopen({str(pid_file)!r}, 'w').write(str(os.getpid()))\n" \
+            "print('started', flush=True)\ntime.sleep(60)"
+    real_log = V.log.info
+
+    def interrupt_on_heartbeat(msg, *args):
+        real_log(msg, *args)
+        if "running" in msg:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(V.log, "info", interrupt_on_heartbeat)
+    started = time.monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        V._run_streaming([sys.executable, "-c", child], s, {}, log_path, label="x",
+                         heartbeat_s=0.0)
+    assert time.monotonic() - started < 30
+    pid = int(pid_file.read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)

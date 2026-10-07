@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
-from nepeval_ocr import catalog
-from nepeval_ocr.schema import BenchmarkInfo, MetricValue, ModelInfo, RunResult, SourceInfo
+from himalaya_vlm_eval import catalog
+from himalaya_vlm_eval.schema import BenchmarkInfo, MetricValue, ModelInfo, RunResult, SourceInfo
 
 Handler = Callable[[str, dict[str, Any]], tuple[int, Any, dict[str, str]]]
 
@@ -70,8 +70,8 @@ def mock_openai():
 
 @pytest.fixture(autouse=True)
 def _isolated_env(monkeypatch, tmp_path):
-    for var in ("NEPEVAL_STORE", "NEPEVAL_CATALOG", "NEPEVAL_API_TOKEN", "OPENAI_API_KEY",
-                "OPENROUTER_API_KEY", "TARKA_API_KEY", "NEPEVAL_JUDGE_API_KEY",
+    for var in ("HIMEVAL_STORE", "HIMEVAL_CATALOG", "HIMEVAL_API_TOKEN", "OPENAI_API_KEY",
+                "OPENROUTER_API_KEY", "TARKA_API_KEY", "HIMEVAL_JUDGE_API_KEY",
                 "VLMEVALKIT_DIR", "VLMEVALKIT_PYTHON", "NEPALIPIXEL_DOCS_DIR"):
         monkeypatch.delenv(var, raising=False)
     catalog.reload()
@@ -89,7 +89,7 @@ def make_image(path: Path, text: str = "x", size: tuple[int, int] = (64, 32)) ->
 
 @pytest.fixture
 def manifest_catalog(tmp_path, monkeypatch):
-    """A local OCR benchmark (5 images) registered through NEPEVAL_CATALOG."""
+    """A local OCR benchmark (5 images) registered through HIMEVAL_CATALOG."""
     data = tmp_path / "data"
     rows = []
     texts = ["नमस्कार", "नेपाल सरकार", "काठमाडौं", "क़लम", "धन्यवाद।"]
@@ -122,7 +122,7 @@ prompt: Transcribe.
 metrics: [cer, wer, exact_match, loose_match]
 breakdowns: [level]
 """, "utf-8")
-    monkeypatch.setenv("NEPEVAL_CATALOG", str(cat))
+    monkeypatch.setenv("HIMEVAL_CATALOG", str(cat))
     catalog.reload()
     return {"texts": texts, "dir": data, "catalog": cat}
 

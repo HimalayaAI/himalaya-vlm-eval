@@ -1,14 +1,19 @@
 import json
+import os
+import signal
 import threading
+import time
 
 import pytest
 
-from nepeval_ocr import catalog
-from nepeval_ocr.models.base import FatalModelError, Model, ModelError
-from nepeval_ocr.registry import register_adapter
-from nepeval_ocr.runner import (
+from himalaya_vlm_eval import catalog
+from himalaya_vlm_eval.models.base import FatalModelError, Model, ModelError
+from himalaya_vlm_eval.registry import register_adapter
+from himalaya_vlm_eval.runner import (
     PREDICTIONS,
     RESULT,
+    RUN_LOG,
+    RUN_META,
     SCORES,
     RunAborted,
     RunOptions,
@@ -18,8 +23,8 @@ from nepeval_ocr.runner import (
     latest_records,
     load_result,
 )
-from nepeval_ocr.schema import ModelInfo
-from nepeval_ocr.types import Generation
+from himalaya_vlm_eval.schema import ModelInfo
+from himalaya_vlm_eval.types import Generation
 
 BEHAVIOUR: dict = {}
 
@@ -48,6 +53,18 @@ class FakeModel(Model):
             raise ModelError("boom")
         if self.mode == "crash_after_2" and n > 2:
             raise KeyboardInterrupt
+        if self.mode in ("interrupt_third", "sigterm_third") and n > 1 \
+                and not BEHAVIOUR.get("calm"):
+            # call 3 stops the run while calls 2 and 4 are still in flight
+            if n == 3:
+                time.sleep(0.05)
+                if self.mode == "sigterm_third":
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    time.sleep(0.3)
+                else:
+                    raise KeyboardInterrupt
+            else:
+                time.sleep(0.3)
         return Generation(text=answer, latency_s=0.01, finish_reason="stop",
                           usage={"total_tokens": 7})
 
@@ -113,7 +130,7 @@ def test_different_params_get_a_different_run_dir(tmp_path, bench):
 
 
 def test_subset_is_seeded_and_not_the_head(bench):
-    from nepeval_ocr.benchmarks import NativeBenchmark
+    from himalaya_vlm_eval.benchmarks import NativeBenchmark
 
     nb = NativeBenchmark(bench)
     ids1 = [s.id for s in nb.load(3, seed=1).samples]
@@ -132,7 +149,7 @@ def test_fatal_error_stops_run(tmp_path, bench):
 
 
 def test_consecutive_errors_abort(tmp_path, bench, monkeypatch):
-    import nepeval_ocr.runner as R
+    import himalaya_vlm_eval.runner as R
 
     monkeypatch.setattr(R, "_preflight", lambda *a, **k: None)
     with pytest.raises(RunAborted, match="consecutive"):
@@ -157,7 +174,7 @@ def test_torn_last_line_is_tolerated(tmp_path, bench):
 
 
 def test_ocr_engine_refuses_vqa(tmp_path):
-    from nepeval_ocr.models.ocr_engines import TesseractModel  # noqa: F401
+    from himalaya_vlm_eval.models.ocr_engines import TesseractModel  # noqa: F401
 
     tess = catalog.models()["tesseract-nep"]
     with pytest.raises(Unsupported):
@@ -186,7 +203,7 @@ def test_evaluate_is_idempotent_and_tracks_scoring_changes(tmp_path, bench, mani
 
 
 def test_resume_preflights_on_a_fresh_sample(tmp_path, bench, monkeypatch):
-    import nepeval_ocr.runner as R
+    import himalaya_vlm_eval.runner as R
 
     run_dir = infer(entry(concurrency=1), bench, tmp_path, options=RunOptions(limit=3))
     # Mark the first sample failed and drop the rest: resume must not preflight on s-failed.
@@ -195,7 +212,8 @@ def test_resume_preflights_on_a_fresh_sample(tmp_path, bench, monkeypatch):
     (run_dir / PREDICTIONS).write_text(json.dumps(failed) + "\n")
     seen = []
     real = R._preflight
-    monkeypatch.setattr(R, "_preflight", lambda m, b, s, o: (seen.append(s.id), real(m, b, s, o)))
+    monkeypatch.setattr(R, "_preflight",
+                        lambda m, b, s, *rest: (seen.append(s.id), real(m, b, s, *rest)))
     infer(entry(concurrency=1), bench, tmp_path, options=RunOptions(limit=3))
     assert seen and seen[0] != failed["sample_id"]
     assert all(r["ok"] for r in latest_records(run_dir / PREDICTIONS).values())
@@ -203,8 +221,8 @@ def test_resume_preflights_on_a_fresh_sample(tmp_path, bench, monkeypatch):
 
 def test_cli_concurrency_works_for_engines_without_that_param(tmp_path, manifest_catalog,
                                                              caplog, monkeypatch):
-    from nepeval_ocr.cli import main
-    from nepeval_ocr.models import ocr_engines
+    from himalaya_vlm_eval.cli import main
+    from himalaya_vlm_eval.models import ocr_engines
 
     monkeypatch.setattr(ocr_engines.TesseractModel, "setup", lambda self: None)
     monkeypatch.setattr(ocr_engines.TesseractModel, "_recognize", lambda self, img: "नमस्कार")
@@ -212,3 +230,60 @@ def test_cli_concurrency_works_for_engines_without_that_param(tmp_path, manifest
                "--work-dir", str(tmp_path), "--no-publish"])
     assert rc == 0, caplog.text
     assert "bad params" not in caplog.text
+
+
+def test_runs_saved_before_the_rename_still_evaluate(tmp_path, bench, manifest_catalog):
+    _answers(manifest_catalog["texts"])
+    run_dir = infer(entry(concurrency=1), bench, tmp_path)
+    meta = json.loads((run_dir / RUN_META).read_text())
+    env = meta["environment"]
+    env["nepeval_ocr"] = env.pop("himalaya_vlm_eval")
+    (run_dir / RUN_META).write_text(json.dumps(meta))
+    assert evaluate(run_dir).source.harness_version == env["nepeval_ocr"]
+
+
+def test_interrupt_saves_in_flight_answers(tmp_path, bench):
+    with pytest.raises(KeyboardInterrupt):
+        infer(entry("interrupt_third", concurrency=3), bench, tmp_path)
+    run_dir = next((tmp_path / "runs").iterdir())
+    saved = latest_records(run_dir / PREDICTIONS)
+    assert len(saved) >= 3 and all(r["ok"] for r in saved.values())  # pre-flight + 2 in flight
+    log_text = (run_dir / RUN_LOG).read_text()
+    assert "saving" in log_text and "Re-run the same command to resume" in log_text
+    BEHAVIOUR["calm"] = True  # the endpoint recovers; same config hash → same dir, resumes
+    try:
+        infer(entry("interrupt_third", concurrency=3), bench, tmp_path)
+    finally:
+        BEHAVIOUR.pop("calm")
+    assert len(latest_records(run_dir / PREDICTIONS)) == 5
+    assert "resuming" in (run_dir / RUN_LOG).read_text()
+
+
+def test_run_log_records_every_error_and_the_config(tmp_path, bench, caplog):
+    with pytest.raises(RunAborted):
+        infer(entry("always_error", concurrency=1), bench, tmp_path)
+    run_dir = infer(entry("error_second", concurrency=1), bench, tmp_path)
+    text = (run_dir / RUN_LOG).read_text()
+    assert "config " in text and '"adapter": "fake"' in text
+    assert "error on" in text and "boom" in text
+    assert "errors by kind: 1× boom" in text
+    assert "inference done" in text
+    evaluate(run_dir)
+    assert "scored " in (run_dir / RUN_LOG).read_text()
+
+
+def test_sigterm_stops_the_whole_matrix_and_resumes(tmp_path, manifest_catalog, monkeypatch):
+    from himalaya_vlm_eval.cli import main
+
+    monkeypatch.setattr(catalog, "resolve_model",
+                        lambda name: entry(name, concurrency=3) if name != "fake-b"
+                        else entry(concurrency=3))
+    before = signal.getsignal(signal.SIGTERM)
+    rc = main(["run", "--model", "sigterm_third,fake-b", "--bench", "local-ocr",
+               "--work-dir", str(tmp_path), "--no-publish"])
+    assert rc == 1 and signal.getsignal(signal.SIGTERM) == before  # handler restored
+    runs = list((tmp_path / "runs").iterdir())
+    assert len(runs) == 1  # the second model never started
+    assert len(latest_records(runs[0] / PREDICTIONS)) >= 3
+    session = next((tmp_path / "logs").iterdir()).read_text()
+    assert "SIGTERM" in session and "re-run the same command" in session

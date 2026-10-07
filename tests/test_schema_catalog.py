@@ -3,10 +3,10 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from nepeval_ocr import catalog
-from nepeval_ocr.benchmarks import NativeBenchmark
-from nepeval_ocr.models.openai_compat import OpenAICompatModel, TarkaOCRModel
-from nepeval_ocr.schema import BenchmarkInfo, MetricValue, ModelInfo, RunResult, SourceInfo
+from himalaya_vlm_eval import catalog
+from himalaya_vlm_eval.benchmarks import NativeBenchmark
+from himalaya_vlm_eval.models.openai_compat import OpenAICompatModel, TarkaOCRModel
+from himalaya_vlm_eval.schema import BenchmarkInfo, MetricValue, ModelInfo, RunResult, SourceInfo
 
 from .conftest import result
 
@@ -101,7 +101,7 @@ def test_user_catalog_overrides_and_bad_entries(tmp_path, monkeypatch):
     (tmp_path / "models" / "x.yaml").write_text(
         "- id: gpt-4o\n  display_name: Overridden\n  adapter: openai_compat\n"
         "  params: {model: m, base_url: http://x}\n")
-    monkeypatch.setenv("NEPEVAL_CATALOG", str(tmp_path))
+    monkeypatch.setenv("HIMEVAL_CATALOG", str(tmp_path))
     catalog.reload()
     assert catalog.models()["gpt-4o"].info.display_name == "Overridden"
     (tmp_path / "models" / "bad.yaml").write_text("- id: Bad\n  display_name: x\n  adapter: a\n")

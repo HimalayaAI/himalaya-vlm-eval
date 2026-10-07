@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 import os
 import random
 import threading
@@ -13,6 +14,8 @@ from typing import Any
 
 from ..types import Generation, Prompt
 from .base import FatalModelError, Model, ModelError
+
+log = logging.getLogger("himeval.model")
 
 RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504, 520, 522, 524, 529}
 
@@ -194,7 +197,7 @@ class OpenAICompatModel(Model):
                 resp = self._client.post(self.path, json=body)
             except httpx.TransportError as exc:  # timeouts, resets, DNS
                 last = f"{type(exc).__name__}: {exc}"
-                self._sleep(attempt, None)
+                self._sleep(attempt, None, last)
                 continue
             latency = time.perf_counter() - started
 
@@ -204,7 +207,7 @@ class OpenAICompatModel(Model):
                 raise FatalModelError(f"HTTP 404 (unknown model or path?): {resp.text[:300]}")
             if resp.status_code in RETRYABLE_STATUS:
                 last = f"HTTP {resp.status_code}: {resp.text[:300]}"
-                self._sleep(attempt, resp.headers.get("retry-after"))
+                self._sleep(attempt, resp.headers.get("retry-after"), last)
                 continue
             if resp.status_code >= 400:
                 raise ModelError(f"HTTP {resp.status_code}: {resp.text[:500]}")
@@ -212,17 +215,17 @@ class OpenAICompatModel(Model):
                 payload = resp.json()
             except ValueError:
                 last = f"non-JSON response: {resp.text[:200]}"
-                self._sleep(attempt, None)
+                self._sleep(attempt, None, last)
                 continue
             problem = self._valid(payload) if isinstance(payload, dict) else "non-object JSON"
             if problem:
                 last = problem
-                self._sleep(attempt, None)
+                self._sleep(attempt, None, last)
                 continue
             return payload, latency, attempt + 1
         raise ModelError(f"gave up after {self.retries + 1} attempts; last: {last}")
 
-    def _sleep(self, attempt: int, retry_after: str | None) -> None:
+    def _sleep(self, attempt: int, retry_after: str | None, reason: str) -> None:
         if attempt >= self.retries:
             return
         delay = min(60.0, 2.0**attempt) + random.uniform(0, 1)
@@ -231,6 +234,8 @@ class OpenAICompatModel(Model):
                 delay = max(delay, min(120.0, float(retry_after)))
             except ValueError:
                 pass
+        log.debug("%s: attempt %d/%d failed (%s); retrying in %.1fs", self.model,
+                  attempt + 1, self.retries + 1, reason, delay)
         time.sleep(delay)
 
 
@@ -241,7 +246,7 @@ class TarkaOCRModel(OpenAICompatModel):
     path = "/ocr"
 
     def __init__(self, model: str, base_url: str = "https://tarka.rest/v1",
-                 api_key_env: str | list[str] | None = ("TARKA_API_KEY", "NEPEVAL_API_TOKEN"),
+                 api_key_env: str | list[str] | None = ("TARKA_API_KEY", "HIMEVAL_API_TOKEN"),
                  **kwargs: Any) -> None:
         kwargs.setdefault("max_tokens", 4096)
         super().__init__(model, base_url, list(api_key_env or []), **kwargs)

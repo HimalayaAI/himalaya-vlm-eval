@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from nepeval_ocr import catalog
-from nepeval_ocr.benchmarks import NativeBenchmark
+from himalaya_vlm_eval import catalog
+from himalaya_vlm_eval.benchmarks import NativeBenchmark
 
 from .conftest import make_image
 
@@ -159,10 +159,10 @@ def test_missing_root_is_a_clear_error(monkeypatch, tmp_path):
         load("kv")
 
 
-@pytest.mark.skipif(not os.environ.get("NEPEVAL_REAL_DOCS"),
-                    reason="set NEPEVAL_REAL_DOCS to a real generator output root")
+@pytest.mark.skipif(not os.environ.get("HIMEVAL_REAL_DOCS"),
+                    reason="set HIMEVAL_REAL_DOCS to a real generator output root")
 def test_real_generator_output(monkeypatch):
-    monkeypatch.setenv("NEPALIPIXEL_DOCS_DIR", os.environ["NEPEVAL_REAL_DOCS"])
+    monkeypatch.setenv("NEPALIPIXEL_DOCS_DIR", os.environ["HIMEVAL_REAL_DOCS"])
     for view in ("kv", "qa", "page", "table", "layout"):
         b, ls = load(view)
         assert ls.samples, view
