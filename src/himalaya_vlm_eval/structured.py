@@ -67,12 +67,28 @@ def extract_json(text: str) -> Any:
 # --- key-value fields --------------------------------------------------------------------
 
 
+_WRAPPER_KEYS = {"fields", "data", "result", "results", "output", "extracted", "answer", "json"}
+
+
+def _unwrap(pred: Any) -> Any:
+    """{"fields": {...}} / {"data": {...}} → the inner mapping (models often wrap the answer)."""
+    while isinstance(pred, dict) and len(pred) == 1:
+        (k, v), = pred.items()
+        if str(k).strip().lower() in _WRAPPER_KEYS and isinstance(v, (dict, list)):
+            pred = v
+        else:
+            break
+    return pred
+
+
 def _pred_pairs(pred: Any, multi: set[str]) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
+    pred = _unwrap(pred)
+    multi_cf = {m.casefold() for m in multi}
     if isinstance(pred, dict):
         for k, v in pred.items():
             values = v if isinstance(v, list) else [v]
-            if not isinstance(v, list) and k in multi and isinstance(v, str):
+            if not isinstance(v, list) and str(k).casefold() in multi_cf and isinstance(v, str):
                 values = [s for s in re.split(r"\s*[,\n]\s*", v) if s]
             for item in values:
                 if item is None or (isinstance(item, str) and not item.strip()):
@@ -97,7 +113,9 @@ def score_kv(pred: str, refs: Sequence[str], target: Any) -> Score:
     gold = [(str(k), norm(v)) for k, v in target["fields"] if norm(v)]
     multi = {k for k, _ in gold if sum(1 for g, _ in gold if g == k) > 1}
     parsed = extract_json(pred)
-    pairs = _pred_pairs(parsed, multi)
+    # Field ids are matched case-insensitively ("Name" = "name"); values stay exact.
+    canon = {k.casefold(): k for k, _ in gold}
+    pairs = [(canon.get(k.casefold(), k), v) for k, v in _pred_pairs(parsed, multi)]
     remaining = list(pairs)
     tp = 0
     for g in gold:
@@ -185,19 +203,26 @@ def score_reading_order(pred: str, refs: Sequence[str], target: Any,
     else:
         cer = float(bool(pred_text))
 
-    used: set[int] = set()
-    positions: list[int] = []
-    for block in gold_blocks:
-        best, best_i = 0.0, -1
-        for i, line in enumerate(lines):
-            if i in used:
-                continue
-            s = _sim(block, line)
-            if s > best:
-                best, best_i = s, i
-        if best_i >= 0 and best >= match_threshold:
-            used.add(best_i)
-            positions.append(best_i)
+    # Align gold blocks to prediction lines by descending similarity (one-to-one), not greedily
+    # in gold order: with near-identical blocks ("Total: 1000" / "Total: 2000") a garbled line
+    # otherwise steals its neighbour's line and a correctly ordered page is scored as misordered.
+    candidates = sorted(
+        ((_sim(block, line), gi, li) for gi, block in enumerate(gold_blocks)
+         for li, line in enumerate(lines)),
+        reverse=True,
+    )
+    used_gold: set[int] = set()
+    used_lines: set[int] = set()
+    matched: dict[int, int] = {}
+    for sim, gi, li in candidates:
+        if sim < match_threshold:
+            break
+        if gi in used_gold or li in used_lines:
+            continue
+        used_gold.add(gi)
+        used_lines.add(li)
+        matched[gi] = li
+    positions = [matched[gi] for gi in sorted(matched)]
     recall = len(positions) / len(gold_blocks) if gold_blocks else 1.0
     tau = _kendall_tau(positions)
     return {
@@ -444,19 +469,45 @@ def iou(a: Sequence[float], b: Sequence[float]) -> float:
     return inter / union if union > 0 else 0.0
 
 
-def _pred_regions(parsed: Any, scale: float) -> list[tuple[str, list[float]]]:
+def _box_xyxy(item: dict[str, Any], size: Sequence[float] | None) -> list[float] | None:
+    """A predicted box as normalised [x0, y0, x1, y1], or None if unreadable.
+
+    Accepted: `bbox`/`box` as [x0, y0, x1, y1]; `box_2d` as [y0, x0, y1, x1] (the Gemini
+    convention); values on a 0-1000 grid (the prompt's format), 0-1 floats, or pixels when the
+    page size is known and a value exceeds 1000."""
+    yxyx = "bbox" not in item and "box" not in item and "box_2d" in item
+    raw = item.get("bbox", item.get("box", item.get("box_2d")))
+    try:
+        v = [float(x) for x in raw]
+    except (TypeError, ValueError):
+        return None
+    if len(v) != 4:
+        return None
+    if yxyx:
+        v = [v[1], v[0], v[3], v[2]]
+    top = max(abs(x) for x in v)
+    if top <= 1.5:
+        scale = (1.0, 1.0)
+    elif top > 1000 and size:
+        scale = (float(size[0]), float(size[1]))
+    else:
+        scale = (1000.0, 1000.0)
+    x0, y0, x1, y1 = v[0] / scale[0], v[1] / scale[1], v[2] / scale[0], v[3] / scale[1]
+    return [min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)]
+
+
+def _pred_regions(
+    parsed: Any, size: Sequence[float] | None = None
+) -> list[tuple[str, list[float]]]:
     items = parsed.get("regions", parsed.get("elements")) if isinstance(parsed, dict) else parsed
     out = []
     for item in items if isinstance(items, list) else []:
         if not isinstance(item, dict):
             continue
-        box = item.get("bbox", item.get("box", item.get("box_2d")))
         role = str(item.get("role", item.get("type", item.get("label", "")))).strip().lower()
-        try:
-            x0, y0, x1, y1 = (float(v) / scale for v in box)
-        except (TypeError, ValueError):
-            continue
-        out.append((role, [min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)]))
+        box = _box_xyxy(item, size)
+        if box is not None:
+            out.append((role, box))
     return out
 
 
@@ -483,11 +534,12 @@ def _match(gold: list[tuple[str, list[float]]], pred: list[tuple[str, list[float
 
 def score_layout(pred: str, refs: Sequence[str], target: Any, thr: float = 0.5) -> Score:
     """target = {"regions": [{"role", "box": [x0,y0,x1,y1] in 0–1]}]}. Predictions are
-    `[{"role", "bbox": [x0,y0,x1,y1]}]` on a 0–1000 grid. A match needs IoU ≥ 0.5;
-    `layout_f1` also needs the role to agree, `detection_f1` does not."""
+    `[{"role", "bbox": [x0,y0,x1,y1]}]` on a 0–1000 grid. 0–1 floats, pixels (when
+    target["size"] = [w, h] is given) and Gemini-style `box_2d` = [y0,x0,y1,x1] are also read.
+    A match needs IoU ≥ 0.5; `layout_f1` also needs the role to agree, `detection_f1` does not."""
     gold = [(r["role"], list(r["box"])) for r in target["regions"]]
     parsed = extract_json(pred)
-    preds = _pred_regions(parsed, 1000.0)
+    preds = _pred_regions(parsed, target.get("size"))
     out: Score = {"layout_parse_ok": float(parsed is not None)}
     for name, same_role in (("layout", True), ("detection", False)):
         tp = _match(gold, preds, thr, same_role)

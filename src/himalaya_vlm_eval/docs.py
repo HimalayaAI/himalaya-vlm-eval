@@ -292,6 +292,6 @@ def _layout(root: Path, leaf: Path, row: dict[str, Any], skipped: dict[str, int]
             references=[],
             image=_PageImage(_resolve_image(leaf, root, page["image_path"])),
             meta=_meta(row) | {"regions": len(gold)},
-            target={"regions": gold},
+            target={"regions": gold, **({"size": [w, h]} if w and h else {})},
         ))
     return out
