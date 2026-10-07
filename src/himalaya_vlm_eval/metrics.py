@@ -42,26 +42,71 @@ def _ref(refs: Sequence[str]) -> str:
 # --- transcription -----------------------------------------------------------------------
 
 
-def cer(pred: str, refs: Sequence[str]) -> float:
-    """Character error rate on canonical text. Unbounded above (insertions count)."""
-    r, p = T.canonical(_ref(refs)), T.canonical(pred)
+def _best(error: Callable[[str, str], float], pred: str, refs: Sequence[str]) -> float:
+    """Lowest error against any reference (a prediction equal to any one of them is perfect)."""
+    return min((error(pred, r) for r in refs), default=error(pred, ""))
+
+
+def _cer(pred: str, ref: str) -> float:
+    r, p = T.canonical(ref), T.canonical(pred)
     if not r:
         return 0.0 if not p else 1.0
     return edit_distance(r, p) / len(r)
+
+
+def _wer(pred: str, ref: str) -> float:
+    r, p = T.canonical(ref).split(), T.canonical(pred).split()
+    if not r:
+        return 0.0 if not p else 1.0
+    return edit_distance(r, p) / len(r)
+
+
+def _ned(pred: str, ref: str) -> float:
+    r, p = T.canonical(ref), T.canonical(pred)
+    longest = max(len(r), len(p))
+    return edit_distance(r, p) / longest if longest else 0.0
+
+
+def _acer(pred: str, ref: str) -> float:
+    r, p = T.aksharas(T.canonical(ref)), T.aksharas(T.canonical(pred))
+    if not r:
+        return 0.0 if not p else 1.0
+    return edit_distance(r, p) / len(r)
+
+
+def _wer_loose(pred: str, ref: str) -> float:
+    r, p = T.loose(ref).split(), T.loose(pred).split()
+    if not r:
+        return 0.0 if not p else 1.0
+    return edit_distance(r, p) / len(r)
+
+
+def cer(pred: str, refs: Sequence[str]) -> float:
+    """Character error rate on canonical text (Unicode code points). Unbounded above
+    (insertions count). Best over all references."""
+    return _best(_cer, pred, refs)
 
 
 def wer(pred: str, refs: Sequence[str]) -> float:
-    r, p = T.canonical(_ref(refs)).split(), T.canonical(pred).split()
-    if not r:
-        return 0.0 if not p else 1.0
-    return edit_distance(r, p) / len(r)
+    """Word error rate; words split on whitespace only (see `wer_loose`). Best over references."""
+    return _best(_wer, pred, refs)
 
 
 def ned(pred: str, refs: Sequence[str]) -> float:
     """Normalized edit distance in [0, 1] (OmniDocBench-style): distance / max length."""
-    r, p = T.canonical(_ref(refs)), T.canonical(pred)
-    longest = max(len(r), len(p))
-    return edit_distance(r, p) / longest if longest else 0.0
+    return _best(_ned, pred, refs)
+
+
+def acer(pred: str, refs: Sequence[str]) -> float:
+    """Akshara error rate: edit distance over aksharas (what a reader sees as one character),
+    zero-width characters ignored. One wrong vowel sign costs one unit, not a fraction of one."""
+    return _best(_acer, pred, refs)
+
+
+def wer_loose(pred: str, refs: Sequence[str]) -> float:
+    """WER on the `loose` text: punctuation (danda included) and zero-width characters are
+    ignored and case folded, so `ल्यायो।` and `ल्यायो` are the same word."""
+    return _best(_wer_loose, pred, refs)
 
 
 def char_accuracy(pred: str, refs: Sequence[str]) -> float:
@@ -132,6 +177,8 @@ def contains_match(pred: str, refs: Sequence[str]) -> float:
 METRICS: dict[str, Metric] = {
     "cer": cer,
     "wer": wer,
+    "acer": acer,
+    "wer_loose": wer_loose,
     "ned": ned,
     "char_accuracy": char_accuracy,
     "exact_match": exact_match,
@@ -147,6 +194,8 @@ METRICS: dict[str, Metric] = {
 WORST: dict[str, float] = {
     "cer": 1.0,
     "wer": 1.0,
+    "acer": 1.0,
+    "wer_loose": 1.0,
     "ned": 1.0,
     "char_accuracy": 0.0,
     "exact_match": 0.0,
