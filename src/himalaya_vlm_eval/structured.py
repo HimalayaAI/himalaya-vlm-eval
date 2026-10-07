@@ -167,24 +167,52 @@ def score_kv(pred: str, refs: Sequence[str], target: Any) -> Score:
 # --- QA with unanswerable questions -----------------------------------------------------
 
 
+# Refusals in other words, for `abstained_loose`. Matched as whole words on the `loose` text,
+# so punctuation, case and zero-width characters do not matter. A bare छैन ("is not") is left
+# out on purpose: it is also a printed value on many forms.
+_REFUSALS = tuple(f" {T.loose(p)} " for p in (
+    ANSWER_NOT_PRESENT,
+    "उत्तर उपलब्ध छैन", "उपलब्ध छैन", "उत्तर छैन", "उल्लेख छैन", "उल्लेख गरिएको छैन",
+    "दिइएको छैन", "भेटिएन", "भेटिँदैन", "फेला परेन", "फेला पार्न सकिएन", "पाइएन",
+    "देखिँदैन", "देखिएन", "थाहा छैन",
+    "not present", "not found", "not available", "not mentioned", "not visible",
+    "not provided", "not specified", "not shown", "not stated", "not given",
+    "cannot find", "can't find", "could not find", "couldn't find", "unable to find",
+    "does not contain", "doesn't contain", "does not mention", "doesn't mention",
+    "does not appear", "doesn't appear", "no answer", "unanswerable", "i don't know",
+))
+
+
 def is_abstention(pred: str) -> bool:
+    """The exact refusal the prompt asks for (strict; what `qa_score` credits)."""
     p = T.loose(T.clean_model_output(pred))
     return T.loose(ANSWER_NOT_PRESENT) in p
+
+
+def is_loose_abstention(pred: str) -> bool:
+    """Any common refusal phrase in Nepali or English, the exact string included."""
+    p = f" {T.loose(T.clean_model_output(pred))} "
+    return any(r in p for r in _REFUSALS)
 
 
 def score_qa(pred: str, refs: Sequence[str], target: Any) -> Score:
     """target = {"answerable": bool}. `qa_score` is ANLS on answerable questions and
     1/0 for correctly abstaining on unanswerable ones; the rest split the two failure modes
-    (hallucinating an answer that is not on the page vs. refusing one that is)."""
+    (hallucinating an answer that is not on the page vs. refusing one that is).
+
+    Abstaining means replying with the exact string the prompt asks for. `abstained_loose`
+    (unanswerable questions only) also accepts a refusal in other words, so a model that
+    refuses in its own phrasing is told apart from one that invents an answer."""
     answerable = bool(target.get("answerable", True))
     abstained = is_abstention(pred)
     if answerable:
         acc = 0.0 if abstained else anls(T.canonical(T.clean_model_output(pred)),
                                          [T.canonical(r) for r in refs])
         return {"qa_score": acc, "anls_answerable": acc, "false_abstention": float(abstained),
-                "abstention_accuracy": None}
+                "abstention_accuracy": None, "abstained_loose": None}
     return {"qa_score": float(abstained), "anls_answerable": None, "false_abstention": None,
-            "abstention_accuracy": float(abstained)}
+            "abstention_accuracy": float(abstained),
+            "abstained_loose": float(abstained or is_loose_abstention(pred))}
 
 
 # --- reading order -----------------------------------------------------------------------
@@ -278,6 +306,7 @@ class _TableParser(HTMLParser):
         self._row: _Node | None = None
         self._cell: _Node | None = None
         self._buf: list[str] = []
+        self._nested = 0  # depth of tables inside the outer table's cells
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         a = dict(attrs)
@@ -285,6 +314,11 @@ class _TableParser(HTMLParser):
             self._table = _Node("table")
         elif self._table is None:
             return
+        elif tag == "table":
+            self._nested += 1
+        elif self._nested:  # an inner table is text of the outer cell, not rows of its own
+            if tag in ("tr", "td", "th", "br"):
+                self._buf.append(" ")
         elif tag == "tr":
             self._close_cell()
             self._row = _Node("tr")
@@ -309,6 +343,10 @@ class _TableParser(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         if self._table is None:
+            return
+        if self._nested:
+            if tag == "table":
+                self._nested -= 1
             return
         if tag in ("td", "th"):
             self._close_cell()
@@ -336,6 +374,7 @@ class _TableParser(HTMLParser):
             self._close_cell()
             self.tables.append(self._table)
             self._table = None
+            self._nested = 0
 
 
 def _markdown_table(text: str) -> _Node | None:
@@ -587,7 +626,8 @@ SCORERS: dict[str, Scorer] = {
 
 METRICS: dict[str, list[str]] = {
     "kv": ["kv_f1", "kv_precision", "kv_recall", "kv_value_sim", "kv_doc_exact", "kv_parse_ok"],
-    "qa": ["qa_score", "anls_answerable", "false_abstention", "abstention_accuracy"],
+    "qa": ["qa_score", "anls_answerable", "false_abstention", "abstention_accuracy",
+           "abstained_loose"],
     "reading_order": ["cer", "char_accuracy", "reading_order", "block_recall"],
     "table": ["teds", "teds_struct", "table_parse_ok"],
     "layout": ["layout_f1", "layout_precision", "layout_recall", "detection_f1",

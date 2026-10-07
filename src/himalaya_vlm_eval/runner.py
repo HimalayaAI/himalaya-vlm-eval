@@ -464,13 +464,17 @@ def _evaluate(run_dir: Path, bench_entry: BenchmarkEntry | None,
     for name in metric_names:
         # None = not applicable to that sample (e.g. answer accuracy on an unanswerable
         # question); it is left out of the mean rather than counted as zero.
-        vals = [row["scores"][name] for row in per_sample
-                if row["scores"].get(name) is not None]
+        rows = [row for row in per_sample if row["scores"].get(name) is not None]
+        vals = [row["scores"][name] for row in rows]
         if not vals:
             continue
         mean = statistics.fmean(vals)
         if name == primary:
-            lo, hi = M.bootstrap_ci(vals, n_resamples=n_resamples)
+            # Resample whole documents when every sample knows its document (pages of one
+            # document, questions on one page); otherwise samples are taken as independent.
+            docs = [row["meta"].get("doc_id") for row in rows]
+            groups = docs if all(d is not None for d in docs) else None
+            lo, hi = M.bootstrap_ci(vals, n_resamples=n_resamples, groups=groups)
             metric_values[name] = MetricValue(value=mean, ci_low=lo, ci_high=hi)
         else:
             metric_values[name] = MetricValue(value=mean)

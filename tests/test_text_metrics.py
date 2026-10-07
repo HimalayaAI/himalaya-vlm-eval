@@ -38,6 +38,10 @@ def test_clean_model_output():
     assert T.clean_model_output("```text\nनेपाल\n```") == "नेपाल"
     assert T.clean_model_output("नेपाल<|endoftext|>") == "नेपाल"
     assert T.clean_model_output("a ``` b") == "a ``` b"
+    # truncated reasoning (no closing tag) and a closing tag whose <think> was in the prompt
+    assert T.clean_model_output("<think>पहिले हेरौं, शीर्षक") == ""
+    assert T.clean_model_output("नेपाल <think>अझै सोच्दै") == "नेपाल"
+    assert T.clean_model_output("reasoning…\n</think>\nनेपाल") == "नेपाल"
 
 
 @pytest.mark.parametrize(
@@ -104,6 +108,20 @@ def test_bootstrap_ci_is_deterministic_and_brackets_the_mean():
     assert M.bootstrap_ci([0.3]) == (0.3, 0.3)
     with pytest.raises(ValueError):
         M.bootstrap_ci([])
+
+
+def test_bootstrap_ci_by_group_is_wider_for_correlated_samples():
+    # 20 documents, 5 pages each; pages of a document score alike.
+    vals = [float(d % 2) for d in range(20) for _ in range(5)]
+    groups = [d for d in range(20) for _ in range(5)]
+    lo, hi = M.bootstrap_ci(vals, seed=1)
+    glo, ghi = M.bootstrap_ci(vals, seed=1, groups=groups)
+    assert glo < 0.5 < ghi
+    assert ghi - glo > 1.5 * (hi - lo)
+    assert (glo, ghi) == M.bootstrap_ci(vals, seed=1, groups=groups)
+    assert M.bootstrap_ci([0.2, 0.4], groups=["a", "a"]) == pytest.approx((0.3, 0.3))
+    with pytest.raises(ValueError):
+        M.bootstrap_ci([0.2, 0.4], groups=["a"])
 
 
 def test_nfc_is_idempotent_on_generated_ground_truth():

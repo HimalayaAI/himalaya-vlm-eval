@@ -135,6 +135,7 @@ class FakeS3:
 
 
 def test_s3_store_with_prefix():
+    pytest.importorskip("botocore")  # the [s3] extra, not part of [dev]
     s = S3Store.__new__(S3Store)
     s.bucket, s.prefix, s.url, s._s3 = "b", "himeval", "s3://b/himeval", FakeS3()
     r = result("m", "b", 1.0)

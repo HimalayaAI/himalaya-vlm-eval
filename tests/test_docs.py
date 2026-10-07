@@ -118,6 +118,8 @@ def test_qa_view_includes_negatives(docs):
     assert neg.question == "नागरिकता नम्बर के हो?"
     assert neg.load_image().size == (1000, 800)
     assert "ANSWER NOT PRESENT" in b.prompt(neg).text
+    # the blocked copy is the same document, so the CI resamples them together
+    assert {s.meta["doc_id"] for s in ls.samples} == {"cert_format_01_000000"}
 
 
 def test_page_view_strips_logo(docs):
