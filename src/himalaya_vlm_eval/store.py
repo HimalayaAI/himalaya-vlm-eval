@@ -200,3 +200,13 @@ def read_samples(store: Store, run_id: str) -> list[dict]:
     raw = store.get(f"runs/{run_id}/{SAMPLES_KEY}")
     with gzip.GzipFile(fileobj=io.BytesIO(raw)) as gz:
         return [json.loads(line) for line in gz.read().decode("utf-8").splitlines() if line]
+
+
+def iter_results(store: Store) -> Iterator[RunResult]:
+    """Every valid published result (an unreadable one is skipped, as the API skips it)."""
+    for obj in store.list("runs/"):
+        if obj.key.endswith("/" + RESULT_KEY):
+            try:
+                yield RunResult.model_validate_json(store.get(obj.key))
+            except Exception:
+                continue

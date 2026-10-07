@@ -1,0 +1,43 @@
+name: Arena sync
+
+# Weekly: import the newest Arena snapshot (official HF dataset, CC BY 4.0) into the result
+# store and refresh prices. Needs repository secrets HIMEVAL_STORE (s3://bucket/prefix) and
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY for a runner identity that can write it; without
+# them the job skips rather than failing.
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    env:
+      HIMEVAL_STORE: ${{ secrets.HIMEVAL_STORE }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION || 'ap-south-1' }}
+    steps:
+      - name: skip without a store
+        id: gate
+        run: |
+          if [ -z "$HIMEVAL_STORE" ]; then
+            echo "HIMEVAL_STORE secret not set; nothing to import into" >> "$GITHUB_STEP_SUMMARY"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+      - if: steps.gate.outputs.run == 'true'
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - if: steps.gate.outputs.run == 'true'
+        run: uv python install 3.12 && uv sync --locked --extra run --extra s3
+      - if: steps.gate.outputs.run == 'true'
+        run: uv run himeval import-arena | tee -a "$GITHUB_STEP_SUMMARY"

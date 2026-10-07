@@ -56,6 +56,7 @@
   engine: vlmevalkit
   display_name: olmOCR-Bench
   category: ocr
+  board: document/parsing
   description: Unit-test-style checks on PDF page conversion (text presence/absence, order, tables, math). Needs VLMEvalKit's olmOCRBench eval requirements.
   url: https://github.com/allenai/olmocr
   primary_metric: pass_rate
@@ -93,6 +94,7 @@
   engine: vlmevalkit
   display_name: OmniDocBench (EN)
   category: document
+  board: document/parsing
   description: End-to-end PDF page parsing; mean normalised edit distance over text, formula, table and reading order (English pages). Lower is better.
   url: https://github.com/opendatalab/OmniDocBench
   primary_metric: edit_distance

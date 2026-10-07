@@ -5,6 +5,7 @@ id: nepalipixel
 engine: native
 display_name: NepaliPixel OCR
 category: ocr
+board: vision/nepali-ocr
 language: ne
 description: >-
   Synthetic Nepali (Devanagari) OCR across word, sentence, paragraph and page levels,

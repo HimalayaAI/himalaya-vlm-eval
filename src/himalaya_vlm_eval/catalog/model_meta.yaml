@@ -1,0 +1,23 @@
+# Model metadata overrides for `himeval meta refresh` (see himalaya_vlm_eval/meta.py).
+#
+# Keyed by model id as it appears on the board. Each entry is one of:
+#   {openrouter: <vendor/model>}     price and context from that OpenRouter model
+#   {input_price, output_price, context_length}   explicit values ($ per 1M tokens)
+#   {pricing: none}                  never priced, even if a name happens to match
+#
+# Only for names the automatic matcher cannot pair. A wrong price is worse than N/A, so
+# an entry here should name the exact same model, not a sibling or a successor.
+
+# Arena names that carry a release tag where OpenRouter carries a version.
+mistral-medium-2505: {openrouter: mistralai/mistral-medium-3}
+mistral-medium-2508: {openrouter: mistralai/mistral-medium-3.1}
+mistral-large-3: {openrouter: mistralai/mistral-large-2512}
+amazon-nova-lite-v1.0: {openrouter: amazon/nova-lite-v1}
+amazon-nova-pro-v1.0: {openrouter: amazon/nova-pro-v1}
+llama-4-maverick-17b-128e-instruct: {openrouter: meta-llama/llama-4-maverick}
+llama-4-scout-17b-16e-instruct: {openrouter: meta-llama/llama-4-scout}
+gemma-4-26b-a4b: {openrouter: google/gemma-4-26b-a4b-it}
+gemma-4-31b: {openrouter: google/gemma-4-31b-it}
+qwen2.5-vl-72b-instruct: {openrouter: qwen/qwen2.5-vl-72b-instruct}
+# OpenRouter lists Qwen3.8-Max only under its dated id; Arena's price shows the same model.
+qwen3.8-max: {openrouter: qwen/qwen3.8-max-0902}

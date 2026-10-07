@@ -24,7 +24,9 @@ from .schema import BenchmarkInfo, ModelInfo
 
 BUILTIN_DIR = Path(__file__).parent / "catalog"
 
-Engine = Literal["native", "vlmevalkit"]
+# `arena` boards are imported (`himeval import-arena`), never run.
+Engine = Literal["native", "vlmevalkit", "arena"]
+RUNNABLE_ENGINES = ("native", "vlmevalkit")
 
 
 @dataclass
@@ -93,28 +95,131 @@ def models() -> dict[str, ModelEntry]:
     return found
 
 
+@dataclass(frozen=True)
+class BoardCategory:
+    id: str
+    label: str
+
+
+@dataclass(frozen=True)
+class BoardType:
+    id: str
+    label: str
+    categories: tuple[BoardCategory, ...]
+
+
+@dataclass(frozen=True)
+class Layout:
+    """catalog/boards.yaml: the top-bar types, their side-list categories, and the default
+    board for each benchmark category."""
+
+    types: tuple[BoardType, ...]
+    defaults: dict[str, str]
+
+    def boards(self) -> list[str]:
+        return [f"{t.id}/{c.id}" for t in self.types for c in t.categories]
+
+
+def _load_yaml(path: Path) -> Any:
+    with path.open(encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
+
+
+@lru_cache(maxsize=1)
+def layout() -> Layout:
+    """The last catalog directory holding a boards.yaml wins (a deployment can re-lay the
+    board without forking)."""
+    path = [d / "boards.yaml" for d in _catalog_dirs() if (d / "boards.yaml").exists()][-1]
+    raw = _load_yaml(path)
+    types = tuple(
+        BoardType(t["id"], t["label"],
+                  tuple(BoardCategory(c["id"], c["label"]) for c in t["categories"]))
+        for t in raw["types"]
+    )
+    out = Layout(types, dict(raw.get("defaults") or {}))
+    known = set(out.boards())
+    bad = {k: v for k, v in out.defaults.items() if v not in known}
+    if bad:
+        raise ValueError(f"{path}: defaults point at unknown boards {bad}")
+    return out
+
+
 @lru_cache(maxsize=1)
 def benchmarks() -> dict[str, BenchmarkEntry]:
     found: dict[str, BenchmarkEntry] = {}
     info_fields = set(BenchmarkInfo.model_fields)
+    lay = layout()
+    known_boards = set(lay.boards())
     for d in _catalog_dirs():
         for path, doc in _yaml_docs(d / "benchmarks"):
             for raw in doc if isinstance(doc, list) else [doc]:
                 raw = dict(raw)
                 try:
                     engine = raw.pop("engine", "native")
+                    if engine not in RUNNABLE_ENGINES:
+                        raise ValueError(f"unknown engine {engine!r}")
+                    raw.setdefault("board", lay.defaults.get(raw.get("category", "")))
                     info = BenchmarkInfo(**{k: v for k, v in raw.items() if k in info_fields})
                     spec = {k: v for k, v in raw.items() if k not in info_fields}
-                    if engine not in ("native", "vlmevalkit"):
-                        raise ValueError(f"unknown engine {engine!r}")
+                    if info.board not in known_boards:
+                        raise ValueError(f"board {info.board!r} is not in boards.yaml")
                 except Exception as exc:
                     raise ValueError(f"{path}: benchmark {raw.get('id', '?')}: {exc}") from exc
                 found[info.id] = BenchmarkEntry(info, engine, spec, path)
+        arena_path = d / "arena.yaml"
+        if arena_path.exists():
+            for entry in _arena_entries(arena_path, known_boards):
+                found[entry.info.id] = entry
     return found
+
+
+ARENA_METRIC = "arena_score"
+
+
+def _arena_entries(path: Path, known_boards: set[str]) -> list[BenchmarkEntry]:
+    raw = _load_yaml(path)
+    out = []
+    for arena in raw["arenas"]:
+        for cat in arena["categories"]:
+            board = f"{arena['type']}/{cat['board']}"
+            if board not in known_boards:
+                raise ValueError(f"{path}: arena {arena['id']}/{cat['key']}: board {board!r} "
+                                 "is not in boards.yaml")
+            for style_control in (True, False):
+                bid = f"arena-{arena['id']}-{cat['board']}"
+                name = f"{arena['display_name']} · {cat['label']}"
+                if not style_control:
+                    bid += "-no-style-control"
+                    name += " (no style control)"
+                info = BenchmarkInfo(
+                    id=bid,
+                    display_name=name,
+                    category=cat["category"],
+                    description=arena["description"].strip(),
+                    url=arena["url"],
+                    language=cat.get("language", "multi"),
+                    primary_metric=ARENA_METRIC,
+                    higher_is_better=True,
+                    scale_max=None,
+                    board=board,
+                    style_control=style_control,
+                    cases_unit="votes",
+                )
+                spec = {
+                    "dataset": raw["dataset"],
+                    "subset": arena["subsets"]["style_control" if style_control else "raw"],
+                    "category_key": cat["key"],
+                    "arena": arena["id"],
+                    "license": raw.get("license"),
+                    "attribution": " ".join(str(raw.get("attribution", "")).split()),
+                }
+                out.append(BenchmarkEntry(info, "arena", spec, path))
+    return out
 
 
 def reload() -> None:
     models.cache_clear()
+    layout.cache_clear()
     benchmarks.cache_clear()
 
 
@@ -183,16 +288,18 @@ def resolve_benchmark(name: str) -> BenchmarkEntry:
 
 
 def select_benchmarks(spec: str) -> list[BenchmarkEntry]:
-    """Comma list of ids, `category:<name>`, `engine:<name>`, or `all`."""
+    """Comma list of ids, `category:<name>`, `engine:<name>`, or `all`. `all` and
+    `category:` select runnable benchmarks only (Arena boards are imported, not run)."""
     out: dict[str, BenchmarkEntry] = {}
+    runnable = {k: b for k, b in benchmarks().items() if b.engine in RUNNABLE_ENGINES}
     for token in (t.strip() for t in spec.split(",")):
         if not token:
             continue
         if token == "all":
-            out.update(benchmarks())
+            out.update(runnable)
         elif token.startswith("category:"):
             cat = token.split(":", 1)[1]
-            matched = {k: b for k, b in benchmarks().items() if b.info.category == cat}
+            matched = {k: b for k, b in runnable.items() if b.info.category == cat}
             if not matched:
                 raise KeyError(f"no benchmarks in category {cat!r}")
             out.update(matched)

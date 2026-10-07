@@ -57,6 +57,9 @@ def test_builtin_catalog_loads_and_is_consistent():
     for b in benches.values():
         if b.engine == "native":
             NativeBenchmark(b)  # validates metrics/scorer/prompt
+        elif b.engine == "arena":
+            assert b.info.scale_max is None and b.info.cases_unit == "votes"
+            assert b.spec["subset"] and b.spec["category_key"] and b.spec["license"]
         else:
             spec = b.spec["vlmeval"]
             assert spec["dataset"] and spec["files"] and spec["judge"] in {"none", "extract",
@@ -91,7 +94,9 @@ def test_select_benchmarks():
     ids = {b.info.id for b in catalog.select_benchmarks("category:math,ocrbench")}
     assert "ocrbench" in ids and "mathvista-mini" in ids
     assert {b.info.id for b in catalog.select_benchmarks("NepaliPixel")} == {"nepalipixel"}
-    assert len(catalog.select_benchmarks("all")) == len(catalog.benchmarks())
+    runnable = [b for b in catalog.benchmarks().values() if b.engine != "arena"]
+    assert len(catalog.select_benchmarks("all")) == len(runnable)  # Arena is imported only
+    assert all(b.engine == "arena" for b in catalog.select_benchmarks("engine:arena"))
     with pytest.raises(KeyError):
         catalog.select_benchmarks("category:nope")
 
@@ -115,3 +120,43 @@ def test_bad_model_params_are_reported():
                            {"model": "m", "base_url": "http://x", "nope": 1})
     with pytest.raises(ValueError, match="bad params"):
         e.build()
+
+
+def test_every_benchmark_sits_on_a_board_of_the_layout():
+    lay = catalog.layout()
+    boards = set(lay.boards())
+    assert [t.id for t in lay.types] == ["vision", "document"]
+    benches = catalog.benchmarks()
+    assert all(b.info.board in boards for b in benches.values())
+    assert benches["nepalipixel"].info.board == "vision/nepali-ocr"
+    assert benches["nepalipixel-docs-kv"].info.board == "document/nepali-fields"
+    assert benches["omnidocbench"].info.board == "document/parsing"
+    assert benches["docvqa-val"].info.board == "document/doc-qa"  # category default
+    # Arena: every category in both variants, on its own board
+    sc = benches["arena-vision-ocr"].info
+    raw = benches["arena-vision-ocr-no-style-control"].info
+    assert sc.board == raw.board == "vision/ocr"
+    assert (sc.style_control, raw.style_control) == (True, False)
+    arena = [b for b in benches.values() if b.engine == "arena"]
+    assert len(arena) == 2 * (10 + 1)
+
+
+def test_unbounded_rating_has_no_score_100():
+    info = catalog.benchmarks()["arena-vision-overall"].info
+    assert info.score_100(1300.0) is None and not info.bounded
+    assert catalog.benchmarks()["nepalipixel"].info.score_100(0.5) == 50.0
+
+
+def test_board_outside_the_layout_is_refused(tmp_path, monkeypatch):
+    (tmp_path / "benchmarks").mkdir()
+    (tmp_path / "benchmarks" / "x.yaml").write_text(
+        "id: odd\ndisplay_name: Odd\ncategory: ocr\nboard: vision/nope\n"
+        "primary_metric: cer\ntask: ocr\n")
+    monkeypatch.setenv("HIMEVAL_CATALOG", str(tmp_path))
+    catalog.reload()
+    try:
+        with pytest.raises(ValueError, match=r"not in boards\.yaml"):
+            catalog.benchmarks()
+    finally:
+        monkeypatch.delenv("HIMEVAL_CATALOG")
+        catalog.reload()

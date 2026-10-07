@@ -1,0 +1,49 @@
+# Arena (arena.ai, formerly LMArena) boards, imported — never run here. Scores are
+# Bradley–Terry ratings from pairwise human votes, with 95% CIs.
+#
+# Source: the official Hugging Face dataset `lmarena-ai/leaderboard-dataset` (CC BY 4.0),
+# which Arena publishes for reuse. arena.ai pages themselves are NOT a source: Arena's
+# Terms of Use forbid scraping and automated access, so nothing here reads them.
+#
+# Each category expands into two benchmarks: `arena-<arena>-<category>` (style-controlled,
+# Arena's default view) and `…-no-style-control`. `key` is the dataset's category value.
+# Import with `himeval import-arena`.
+
+dataset: lmarena-ai/leaderboard-dataset
+license: CC-BY-4.0
+attribution: >-
+  Arena leaderboard dataset by Arena Intelligence, Inc. (lmarena-ai/leaderboard-dataset),
+  licensed CC BY 4.0.
+
+arenas:
+  - id: vision
+    display_name: Vision Arena
+    type: vision
+    url: https://arena.ai/leaderboard/vision
+    subsets: {style_control: vision_style_control, raw: vision}
+    description: >-
+      Pairwise human votes between anonymous vision-language models on user-submitted
+      images and prompts.
+    categories:
+      - {key: overall, board: overall, label: Overall, category: general}
+      - {key: english, board: english, label: English, category: general}
+      - {key: chinese, board: chinese, label: Chinese, category: general, language: zh}
+      - {key: captioning, board: captioning, label: Captioning, category: general}
+      - {key: creative_writing_vision, board: creative-writing, label: Creative Writing,
+         category: chat}
+      - {key: diagram, board: diagram, label: Diagram, category: chart}
+      - {key: entity_recognition, board: entity-recognition, label: Entity Recognition,
+         category: general}
+      - {key: homework, board: homework, label: Homework, category: math}
+      - {key: humor, board: humor, label: Humor, category: chat}
+      - {key: ocr, board: ocr, label: OCR, category: ocr}
+
+  - id: document
+    display_name: Document Arena
+    type: document
+    url: https://arena.ai/leaderboard/document
+    subsets: {style_control: document_style_control, raw: document}
+    description: >-
+      Pairwise human votes between anonymous models on user-submitted documents.
+    categories:
+      - {key: overall, board: overall, label: Overall, category: document}

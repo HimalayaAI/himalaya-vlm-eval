@@ -12,10 +12,24 @@ from __future__ import annotations
 
 import statistics
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 from .schema import BenchmarkInfo, ModelInfo, RunResult
+
+Range = tuple[float | None, float | None]
+
+
+def _in(value: float | None, bounds: Range | None) -> bool:
+    """A value inside [lo, hi]. With any bound set, an unknown value is outside: a filter
+    on price cannot vouch for a model whose price nobody knows."""
+    if bounds is None or bounds == (None, None):
+        return True
+    if value is None:
+        return False
+    lo, hi = bounds
+    return (lo is None or value >= lo) and (hi is None or value <= hi)
 
 
 @dataclass
@@ -26,6 +40,12 @@ class Filters:
     models: set[str] | None = None
     include_imported: bool = True
     include_subsets: bool = True
+    score: Range | None = None
+    input_price: Range | None = None  # $ per 1M input tokens
+    output_price: Range | None = None
+    context_length: Range | None = None
+    # model id → {input_price, output_price, context_length}: meta.py's document
+    meta: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     def keep(self, r: RunResult) -> bool:
         m = r.model
@@ -39,7 +59,23 @@ class Filters:
             return False
         if not self.include_imported and r.source.kind == "imported":
             return False
-        return self.include_subsets or not r.is_subset
+        if not self.include_subsets and r.is_subset:
+            return False
+        info = self.meta.get(m.id, {})
+        return (_in(info.get("input_price"), self.input_price)
+                and _in(info.get("output_price"), self.output_price)
+                and _in(info.get("context_length"), self.context_length))
+
+    def keep_score(self, r: RunResult) -> bool:
+        # Applied to the board's own headline value, after the definition is resolved.
+        return _in(r.primary.value, self.score)
+
+
+def blended_price(info: Mapping[str, Any] | None) -> float | None:
+    """Arena's x-axis: (3 × input + output) / 4, $ per 1M tokens."""
+    if not info or info.get("input_price") is None or info.get("output_price") is None:
+        return None
+    return (3 * info["input_price"] + info["output_price"]) / 4
 
 
 def _preference(r: RunResult) -> tuple:
@@ -67,20 +103,32 @@ class BoardRow:
     rank: int
     position: int
     result: RunResult
-    score_100: float
+    score_100: float | None
     better_than: int = 0
+    # Worst rank the CIs allow: 1 + every model that could be ahead. (rank, rank_worst) is
+    # Arena's "rank spread".
+    rank_worst: int = 0
+    meta: Mapping[str, Any] | None = None
+    pareto: bool = False
 
     def to_dict(self) -> dict:
         r = self.result
         p = r.primary
+        info = dict(self.meta or {})
         return {
             "rank": self.rank,
+            "rank_worst": self.rank_worst or self.rank,
             "position": self.position,
             "model": r.model.model_dump(mode="json"),
+            "pricing": ({"input": info.get("input_price"), "output": info.get("output_price"),
+                         "blended": blended_price(info), "source": info.get("source")}
+                        if blended_price(info) is not None else None),
+            "context_length": info.get("context_length"),
+            "pareto": self.pareto,
             "score": p.value,
             "ci_low": p.ci_low,
             "ci_high": p.ci_high,
-            "score_100": round(self.score_100, 4),
+            "score_100": round(self.score_100, 4) if self.score_100 is not None else None,
             "metrics": {k: v.value for k, v in r.metrics.items()},
             "cases": r.cases,
             "errors": r.errors,
@@ -99,7 +147,8 @@ def _bounds(r: RunResult) -> tuple[float, float]:
     return p.ci_low, p.ci_high
 
 
-def rank_results(results: list[RunResult], bench: BenchmarkInfo) -> list[BoardRow]:
+def rank_results(results: list[RunResult], bench: BenchmarkInfo,
+                 meta: Mapping[str, Mapping[str, Any]] | None = None) -> list[BoardRow]:
     hib = bench.higher_is_better
     sign = 1 if hib else -1
     ordered = sorted(results, key=lambda r: (-sign * r.primary.value, r.model.id))
@@ -107,6 +156,7 @@ def rank_results(results: list[RunResult], bench: BenchmarkInfo) -> list[BoardRo
     for r in ordered:
         lo, hi = _bounds(r)
         stat_better = 0
+        could_be_better = 0
         point_better = 0
         for o in ordered:
             if o is r:
@@ -114,11 +164,30 @@ def rank_results(results: list[RunResult], bench: BenchmarkInfo) -> list[BoardRo
             olo, ohi = _bounds(o)
             if (olo > hi) if hib else (ohi < lo):
                 stat_better += 1
+            if (ohi > lo) if hib else (olo < hi):
+                could_be_better += 1
             if sign * o.primary.value > sign * r.primary.value:
                 point_better += 1
         rows.append(BoardRow(rank=1 + stat_better, position=1 + point_better, result=r,
-                             score_100=bench.score_100(r.primary.value)))
+                             score_100=bench.score_100(r.primary.value),
+                             rank_worst=max(1 + stat_better, 1 + could_be_better),
+                             meta=(meta or {}).get(r.model.id)))
+    mark_pareto(rows, hib)
     return rows
+
+
+def mark_pareto(rows: list[BoardRow], higher_is_better: bool = True) -> None:
+    """Flag the price/performance frontier: a priced model no cheaper-or-equal model beats.
+    Unpriced models are never on it (they have no x position)."""
+    sign = 1 if higher_is_better else -1
+    priced = sorted(((blended_price(r.meta), r) for r in rows if blended_price(r.meta) is not None),
+                    key=lambda t: (t[0], -sign * t[1].result.primary.value))
+    best: float | None = None
+    for _, row in priced:
+        value = sign * row.result.primary.value
+        if best is None or value > best:
+            row.pareto = True
+            best = value
 
 
 def under_definition(r: RunResult, ref: BenchmarkInfo) -> RunResult | None:
@@ -147,10 +216,11 @@ def benchmark_board(results: Iterable[RunResult], benchmark_id: str,
     mine = [r for r in results if r.benchmark.id == benchmark_id]
     if not mine:
         return []
+    f = filters or Filters()
     ref = definition or max(mine, key=lambda r: r.created_at).benchmark
     comparable = [c for c in (under_definition(r, ref) for r in mine) if c is not None]
-    reps = list(representatives(comparable, filters).values())
-    return rank_results(reps, ref) if reps else []
+    reps = [r for r in representatives(comparable, f).values() if f.keep_score(r)]
+    return rank_results(reps, ref, f.meta) if reps else []
 
 
 @dataclass
@@ -187,8 +257,10 @@ def overview(results: Iterable[RunResult], benchmark_ids: list[str] | None = Non
     """
     results = list(results)
     defs = definitions or {}
-    boards_all = {b: benchmark_board(results, b, filters, defs.get(b))
-                  for b in sorted({r.benchmark.id for r in results})}
+    # Only bounded scores average onto 0–100; an Arena rating has no such mapping.
+    bounded = {r.benchmark.id for r in results
+               if (defs.get(r.benchmark.id) or r.benchmark).bounded}
+    boards_all = {b: benchmark_board(results, b, filters, defs.get(b)) for b in sorted(bounded)}
     present = [b for b, rows in boards_all.items() if rows]
     selected = [b for b in (benchmark_ids or present) if b in present]
     boards = {b: boards_all[b] for b in selected}
@@ -200,6 +272,7 @@ def overview(results: Iterable[RunResult], benchmark_ids: list[str] | None = Non
             mid = row.result.model.id
             models.setdefault(mid, row.result.model)
             d = per_model[mid]
+            assert row.score_100 is not None  # bounded boards only
             d["scores"].append(row.score_100)
             d["positions"].append(row.position)
             d["cells"][b] = {"score": row.result.primary.value, "score_100": row.score_100,
