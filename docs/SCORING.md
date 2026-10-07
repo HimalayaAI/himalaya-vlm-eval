@@ -21,13 +21,17 @@ whole reply, and `<|endoftext|>`.
 
 | Metric | Definition |
 |---|---|
-| `cer` | char edit distance / reference length. Unbounded (insertions count). |
+| `cer` | char edit distance / reference length, on Unicode code points. Unbounded (insertions count). |
+| `acer` | **akshara** error rate: the same edit distance over aksharas (what a reader sees as one character: a consonant cluster with its vowel signs counts as one), zero-width characters ignored. One wrong vowel sign costs one unit, not a fraction of one: `किताब`→`कताब` is `cer` 0.20 but `acer` 0.33; `विद्यालय`→`विदयालय` is 0.12 vs 0.50. Opt in by adding `acer` to a benchmark's `metrics:`. |
 | `char_accuracy` | `max(0, 1 − cer)` per sample. **Headline** for transcription: bounded, so one hallucinated paragraph on a one-word image cannot dominate the mean. |
-| `wer` | word edit distance / reference words |
+| `wer` | word edit distance / reference words; words split on whitespace only, so `ल्यायो।` ≠ `ल्यायो` |
+| `wer_loose` | `wer` on the `loose` text: punctuation (danda included), zero-width characters and case are ignored |
 | `ned` | edit distance / max(len) ∈ [0, 1] (OmniDocBench-style) |
 | `exact_match` / `loose_match` | canonical / loose equality |
 | `length_ratio` | prediction length / reference length (truncation & hallucination signal) |
 | `anls`, `relaxed_accuracy`, `contains_match` | DocVQA ANLS (τ=0.5), ChartQA 5% numeric tolerance, OCRBench containment |
+
+When a sample has several references, `cer`, `acer`, `wer`, `wer_loose` and `ned` score the best one (lowest error), as `exact_match` and `loose_match` already do.
 
 Errored samples get the worst value of every metric. Aggregates are means; the headline
 metric gets a 1000-resample percentile-bootstrap 95% CI (seeded, deterministic).

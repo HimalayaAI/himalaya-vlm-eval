@@ -36,6 +36,30 @@ def loose(text: str) -> str:
     return _WS.sub(" ", text).strip().casefold()
 
 
+def strip_zero_width(text: str) -> str:
+    """Drop ZWJ/ZWNJ/ZWSP and similar zero-width characters (invisible, rendered inconsistently)."""
+    return text.translate(_ZERO_WIDTH)
+
+
+# One visible Devanagari character (akshara): a chain of consonant + virama, ending in a consonant
+# with its nukta, vowel signs and marks, and an optional trailing virama; or an independent vowel
+# with its marks; anything else (digits, danda, Latin, space) is one unit.
+_CONS = "\u0915-\u0939\u0958-\u095f"
+_MARKS = "\u0900-\u0903\u093a\u093b\u093e-\u094c\u094e\u094f\u0951-\u0957\u0962\u0963"
+_AKSHARA = re.compile(
+    rf"(?:[{_CONS}]\u093c?\u094d)*[{_CONS}]\u093c?[{_MARKS}]*\u094d?"
+    rf"|[\u0904-\u0914\u0960\u0961\u0972-\u097f][{_MARKS}]*"
+    r"|.",
+    re.DOTALL,
+)
+
+
+def aksharas(text: str) -> list[str]:
+    """Split text into aksharas (what a reader sees as one character). Zero-width characters are
+    dropped first, so a conjunct is one unit whether or not a ZWJ/ZWNJ was written."""
+    return _AKSHARA.findall(strip_zero_width(text))
+
+
 def clean_model_output(text: str) -> str:
     """Strip wrapping that is not part of the answer: reasoning blocks and a code fence
     around the whole reply. Applied before scoring, recorded in the run config."""
