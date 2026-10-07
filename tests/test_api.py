@@ -1,11 +1,11 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from nepeval_ocr import catalog
-from nepeval_ocr.api import create_app
-from nepeval_ocr.publish import publish_run
-from nepeval_ocr.runner import evaluate, infer
-from nepeval_ocr.store import LocalStore, publish_result
+from himalaya_vlm_eval import catalog
+from himalaya_vlm_eval.api import create_app
+from himalaya_vlm_eval.publish import publish_run
+from himalaya_vlm_eval.runner import evaluate, infer
+from himalaya_vlm_eval.store import LocalStore, publish_result
 
 from .conftest import result as _result
 from .test_runner import _answers, entry
@@ -13,7 +13,7 @@ from .test_runner import _answers, entry
 
 def result(model, bench, value, **kw):
     """A fixture result on a real catalog benchmark, under its real definition."""
-    from nepeval_ocr.schema import MetricValue
+    from himalaya_vlm_eval.schema import MetricValue
 
     r = _result(model, bench, value, **kw)
     info = catalog.benchmarks()[bench].info

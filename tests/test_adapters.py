@@ -1,9 +1,9 @@
 import pytest
 from PIL import Image
 
-from nepeval_ocr.models.base import FatalModelError, ModelError
-from nepeval_ocr.models.openai_compat import OpenAICompatModel, TarkaOCRModel, encode_image
-from nepeval_ocr.types import Prompt
+from himalaya_vlm_eval.models.base import FatalModelError, ModelError
+from himalaya_vlm_eval.models.openai_compat import OpenAICompatModel, TarkaOCRModel, encode_image
+from himalaya_vlm_eval.types import Prompt
 
 from .conftest import MockOpenAI
 
@@ -124,7 +124,7 @@ def test_encode_image_resizes_and_converts():
 def test_ocr_engines_fail_cleanly_without_dependencies(monkeypatch):
     import builtins
 
-    from nepeval_ocr.models.ocr_engines import EasyOCRModel, TesseractModel
+    from himalaya_vlm_eval.models.ocr_engines import EasyOCRModel, TesseractModel
 
     real_import = builtins.__import__
 

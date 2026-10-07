@@ -1,5 +1,5 @@
-# Benchmarks run by nepeval's own runner: transcription (CER/WER) and short-answer VQA.
-# Add one with a YAML entry; see nepeval_ocr/benchmarks.py for every key.
+# Benchmarks run by himeval's own runner: transcription (CER/WER) and short-answer VQA.
+# Add one with a YAML entry; see himalaya_vlm_eval/benchmarks.py for every key.
 
 id: nepalipixel
 engine: native

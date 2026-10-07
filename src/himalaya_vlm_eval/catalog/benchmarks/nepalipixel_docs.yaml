@@ -3,7 +3,7 @@
 # in the published HF export. Point NEPALIPIXEL_DOCS_DIR at the output root of a run made
 # with `--split benchmark`; only rows with split=benchmark are used.
 #
-# Scorers live in nepeval_ocr/structured.py; text is compared after NFC + whitespace
+# Scorers live in himalaya_vlm_eval/structured.py; text is compared after NFC + whitespace
 # collapse, exactly as the generator's own grounding check does.
 
 - id: nepalipixel-docs-kv

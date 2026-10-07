@@ -1,7 +1,7 @@
 # Results API — `/v1`
 
 Read-only view of the result store. Internal: the studio backend calls it over the
-compose network and the browser never does. If `NEPEVAL_API_TOKEN` is set, every `/v1`
+compose network and the browser never does. If `HIMEVAL_API_TOKEN` is set, every `/v1`
 route requires `Authorization: Bearer <token>`; `/health` stays open for probes.
 
 Responses carry `ETag` and `Cache-Control: private, max-age=30`; send `If-None-Match` to
@@ -9,9 +9,9 @@ get `304`. The ETag changes only when the store's contents change.
 
 | Env | |
 |---|---|
-| `NEPEVAL_STORE` | required — a path or `s3://bucket/prefix` (`AWS_*` credentials, `AWS_ENDPOINT_URL` for S3-compatible) |
-| `NEPEVAL_REFRESH_SECONDS` | store re-list interval, default 60; new results appear within it |
-| `NEPEVAL_API_TOKEN` | optional shared secret |
+| `HIMEVAL_STORE` | required — a path or `s3://bucket/prefix` (`AWS_*` credentials, `AWS_ENDPOINT_URL` for S3-compatible) |
+| `HIMEVAL_REFRESH_SECONDS` | store re-list interval, default 60; new results appear within it |
+| `HIMEVAL_API_TOKEN` | optional shared secret |
 
 ## `GET /health`
 
@@ -49,7 +49,7 @@ true), `include_subsets` (default true).
            "score": 0.912, "ci_low": 0.905, "ci_high": 0.919, "score_100": 91.2,
            "metrics": {"char_accuracy": 0.912, "cer": 0.101, "wer": 0.21, …},
            "cases": 2000, "errors": 3, "partial": true,
-           "source": {"kind": "measured", "harness": "nepeval-ocr", "harness_version": "0.2.0",
+           "source": {"kind": "measured", "harness": "himalaya-vlm-eval", "harness_version": "0.2.0",
                       "judge": null, "url": null, "notes": null},
            "run_id": "…", "created_at": "…", "has_samples": true}]}
 ```

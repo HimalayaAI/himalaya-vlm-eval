@@ -1,7 +1,7 @@
 """Adapter registry: maps the `adapter:` name in a catalog entry to a Model class.
 
 Built-ins are registered lazily by import path, so listing the catalog never imports
-torch. Third-party packages can add adapters through the `nepeval_ocr.adapters`
+torch. Third-party packages can add adapters through the `himalaya_vlm_eval.adapters`
 entry-point group: `myocr = "my_pkg.module:MyModel"`.
 """
 
@@ -13,13 +13,13 @@ from importlib.metadata import entry_points
 from .models.base import Model
 
 _BUILTIN: dict[str, str] = {
-    "openai_compat": "nepeval_ocr.models.openai_compat:OpenAICompatModel",
-    "tarka_ocr": "nepeval_ocr.models.openai_compat:TarkaOCRModel",
-    "tesseract": "nepeval_ocr.models.ocr_engines:TesseractModel",
-    "easyocr": "nepeval_ocr.models.ocr_engines:EasyOCRModel",
-    "paddle": "nepeval_ocr.models.ocr_engines:PaddleOCRModel",
-    "surya": "nepeval_ocr.models.ocr_engines:SuryaModel",
-    "trocr": "nepeval_ocr.models.ocr_engines:TrOCRModel",
+    "openai_compat": "himalaya_vlm_eval.models.openai_compat:OpenAICompatModel",
+    "tarka_ocr": "himalaya_vlm_eval.models.openai_compat:TarkaOCRModel",
+    "tesseract": "himalaya_vlm_eval.models.ocr_engines:TesseractModel",
+    "easyocr": "himalaya_vlm_eval.models.ocr_engines:EasyOCRModel",
+    "paddle": "himalaya_vlm_eval.models.ocr_engines:PaddleOCRModel",
+    "surya": "himalaya_vlm_eval.models.ocr_engines:SuryaModel",
+    "trocr": "himalaya_vlm_eval.models.ocr_engines:TrOCRModel",
 }
 _CUSTOM: dict[str, type[Model]] = {}
 
@@ -35,7 +35,7 @@ def register_adapter(name: str):
 
 
 def _plugin_paths() -> dict[str, str]:
-    return {ep.name: ep.value for ep in entry_points(group="nepeval_ocr.adapters")}
+    return {ep.name: ep.value for ep in entry_points(group="himalaya_vlm_eval.adapters")}
 
 
 def adapter_names() -> list[str]:
@@ -51,5 +51,5 @@ def get_adapter(name: str) -> type[Model]:
     module, _, attr = path.partition(":")
     cls = getattr(importlib.import_module(module), attr)
     if not (isinstance(cls, type) and issubclass(cls, Model)):
-        raise TypeError(f"adapter {name!r} ({path}) is not a nepeval_ocr Model")
+        raise TypeError(f"adapter {name!r} ({path}) is not a himalaya_vlm_eval Model")
     return cls

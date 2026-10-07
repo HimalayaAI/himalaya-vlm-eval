@@ -32,7 +32,7 @@ from typing import Any
 from . import structured as S
 from .types import DataUnavailable, Sample
 
-log = logging.getLogger("nepeval")
+log = logging.getLogger("himeval")
 
 VIEWS = ("kv", "qa", "page", "table", "layout")
 _NEGATIVE_SUFFIX = re.compile(r"_eb\d+$")

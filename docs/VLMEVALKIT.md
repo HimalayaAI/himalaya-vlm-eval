@@ -16,10 +16,10 @@ cd ~/src/VLMEvalKit && python3.11 -m venv .venv && .venv/bin/pip install -e .
 export VLMEVALKIT_DIR=~/src/VLMEvalKit VLMEVALKIT_PYTHON=~/src/VLMEvalKit/.venv/bin/python
 
 # judge for math/chat/chart suites (MCQ suites fall back to exact matching without one)
-export NEPEVAL_JUDGE_API_KEY=sk-…                   # default judge: gpt-4o-mini on api.openai.com
-# or OpenRouter: NEPEVAL_JUDGE_BASE_URL=https://openrouter.ai/api/v1 NEPEVAL_JUDGE_MODEL=openai/gpt-4o-mini
+export HIMEVAL_JUDGE_API_KEY=sk-…                   # default judge: gpt-4o-mini on api.openai.com
+# or OpenRouter: HIMEVAL_JUDGE_BASE_URL=https://openrouter.ai/api/v1 HIMEVAL_JUDGE_MODEL=openai/gpt-4o-mini
 
-nepeval run --model gpt-4o,qwen3-vl-8b-instruct --bench category:math,ocrbench
+himeval run --model gpt-4o,qwen3-vl-8b-instruct --bench category:math,ocrbench
 ```
 
 Datasets download to `$LMUData` (default `~/LMUData`). olmOCR-Bench additionally needs

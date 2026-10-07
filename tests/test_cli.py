@@ -5,9 +5,9 @@ import json
 
 from fastapi.testclient import TestClient
 
-from nepeval_ocr.api import create_app
-from nepeval_ocr.cli import main
-from nepeval_ocr.store import LocalStore
+from himalaya_vlm_eval.api import create_app
+from himalaya_vlm_eval.cli import main
+from himalaya_vlm_eval.store import LocalStore
 
 from .conftest import MockOpenAI
 

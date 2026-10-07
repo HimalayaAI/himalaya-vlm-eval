@@ -1,12 +1,12 @@
-"""Read-only results API: `nepeval serve` / `uvicorn nepeval_ocr.api:app`.
+"""Read-only results API: `himeval serve` / `uvicorn himalaya_vlm_eval.api:app`.
 
 Internal service. The studio backend proxies it; browsers never call it directly. If
-NEPEVAL_API_TOKEN is set every /v1 route requires `Authorization: Bearer <token>`.
+HIMEVAL_API_TOKEN is set every /v1 route requires `Authorization: Bearer <token>`.
 
 Env:
-  NEPEVAL_STORE          path or s3://bucket/prefix (required)
-  NEPEVAL_REFRESH_SECONDS  how often to re-list the store (default 60)
-  NEPEVAL_API_TOKEN      optional shared secret
+  HIMEVAL_STORE          path or s3://bucket/prefix (required)
+  HIMEVAL_REFRESH_SECONDS  how often to re-list the store (default 60)
+  HIMEVAL_API_TOKEN      optional shared secret
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from .leaderboard import Filters, benchmark_board, overview, representatives
 from .schema import SCHEMA_VERSION, RunResult
 from .store import RESULT_KEY, Store, StoreError, open_store, read_samples
 
-log = logging.getLogger("nepeval.api")
+log = logging.getLogger("himeval.api")
 
 
 class Index:
@@ -112,8 +112,8 @@ class Index:
 def create_app(store: Store | None = None, refresh_seconds: float | None = None,
                token: str | None = None) -> FastAPI:
     refresh_every = refresh_seconds if refresh_seconds is not None else float(
-        os.environ.get("NEPEVAL_REFRESH_SECONDS", "60"))
-    api_token = token if token is not None else os.environ.get("NEPEVAL_API_TOKEN") or None
+        os.environ.get("HIMEVAL_REFRESH_SECONDS", "60"))
+    api_token = token if token is not None else os.environ.get("HIMEVAL_API_TOKEN") or None
     state: dict[str, Any] = {}
 
     @asynccontextmanager
@@ -136,7 +136,7 @@ def create_app(store: Store | None = None, refresh_seconds: float | None = None,
         finally:
             stop.set()
 
-    app = FastAPI(title="nepeval results API", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="himeval results API", version=__version__, lifespan=lifespan)
 
     def index() -> Index:
         return state["index"]
@@ -329,7 +329,7 @@ def _matches(meta_value: Any, wanted: str) -> bool:
     return str(meta_value) == wanted
 
 
-def __getattr__(name: str) -> Any:  # `uvicorn nepeval_ocr.api:app` builds from env lazily
+def __getattr__(name: str) -> Any:  # `uvicorn himalaya_vlm_eval.api:app` builds from env lazily
     if name == "app":
         return create_app()
     raise AttributeError(name)

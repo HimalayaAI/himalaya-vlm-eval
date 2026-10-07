@@ -32,7 +32,7 @@
   params:
     model: himalaya-gemma-4-bf16
     base_url: https://tarka.rest/v1
-    api_key_env: [TARKA_API_KEY, NEPEVAL_API_TOKEN]
+    api_key_env: [TARKA_API_KEY, HIMEVAL_API_TOKEN]
     concurrency: 8
 
 - id: himalaya-gemma-4-q8
@@ -44,7 +44,7 @@
   params:
     model: himalaya-gemma-4-q8
     base_url: https://tarka.rest/v1
-    api_key_env: [TARKA_API_KEY, NEPEVAL_API_TOKEN]
+    api_key_env: [TARKA_API_KEY, HIMEVAL_API_TOKEN]
     concurrency: 8
 
 - id: himalaya-gemma-4-q4
@@ -56,10 +56,10 @@
   params:
     model: himalaya-gemma-4-q4
     base_url: https://tarka.rest/v1
-    api_key_env: [TARKA_API_KEY, NEPEVAL_API_TOKEN]
+    api_key_env: [TARKA_API_KEY, HIMEVAL_API_TOKEN]
     concurrency: 8
 
-# The endpoint the earlier nepeval-ocr scripts benchmarked.
+# The endpoint the earlier himalaya-vlm-eval scripts benchmarked.
 - id: himalaya-bf16-scalabs
   display_name: himalaya-bf16 (Scalabs endpoint)
   org: HimalayaAI
@@ -69,6 +69,6 @@
   params:
     model: scalabs/himalaya-bf16
     base_url: https://himalayagpt.api.scalabs.ai/v1
-    api_key_env: [TARKA_API_KEY, NEPEVAL_API_TOKEN, OPENAI_API_KEY]
+    api_key_env: [TARKA_API_KEY, HIMEVAL_API_TOKEN, OPENAI_API_KEY]
     max_tokens: 1024
     concurrency: 4

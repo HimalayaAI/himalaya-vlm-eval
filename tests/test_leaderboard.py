@@ -1,4 +1,4 @@
-from nepeval_ocr.leaderboard import Filters, benchmark_board, overview, representatives
+from himalaya_vlm_eval.leaderboard import Filters, benchmark_board, overview, representatives
 
 from .conftest import result
 
@@ -72,7 +72,7 @@ def test_overview_ignores_unknown_selection():
 
 
 def test_results_from_an_older_definition_are_reexpressed_or_dropped():
-    from nepeval_ocr.schema import MetricValue
+    from himalaya_vlm_eval.schema import MetricValue
 
     old_cer = result("old", "b", 0.9, higher=False, scale=1.0)  # headline was CER (m)
     old_cer.metrics["acc"] = MetricValue(value=0.4)  # but it also recorded accuracy

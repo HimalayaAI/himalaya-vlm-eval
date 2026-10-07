@@ -7,8 +7,8 @@ import textwrap
 
 import pytest
 
-from nepeval_ocr import catalog
-from nepeval_ocr.engines import vlmevalkit as V
+from himalaya_vlm_eval import catalog
+from himalaya_vlm_eval.engines import vlmevalkit as V
 
 FAKE_RUN = textwrap.dedent(r'''
     import argparse, json, os, sys, time
@@ -150,7 +150,7 @@ def test_unsupported_dataset_and_failure_surface(fake_repo, tmp_path, monkeypatc
 
 
 def test_rejects_non_chat_adapters(fake_repo, tmp_path):
-    from nepeval_ocr.runner import Unsupported
+    from himalaya_vlm_eval.runner import Unsupported
 
     with pytest.raises(Unsupported, match="chat-completions"):
         V.run_benchmark(catalog.models()["glm-ocr-nepali"], catalog.resolve_benchmark("ocrbench"),

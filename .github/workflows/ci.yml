@@ -26,11 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t nepeval-api:ci .
+      - run: docker build -t himalaya-vlm-eval-api:ci .
       - name: smoke test the image against an empty store
         run: |
           mkdir -p /tmp/store && chmod 777 /tmp/store
-          docker run -d --name api -p 8000:8000 -e NEPEVAL_STORE=/store -v /tmp/store:/store nepeval-api:ci
+          docker run -d --name api -p 8000:8000 -e HIMEVAL_STORE=/store -v /tmp/store:/store himalaya-vlm-eval-api:ci
           for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 1; done
           curl -sf localhost:8000/v1/benchmarks | python3 -c 'import json,sys; assert len(json.load(sys.stdin)["data"]) > 30'
           docker rm -f api

@@ -3,12 +3,13 @@ import threading
 
 import pytest
 
-from nepeval_ocr import catalog
-from nepeval_ocr.models.base import FatalModelError, Model, ModelError
-from nepeval_ocr.registry import register_adapter
-from nepeval_ocr.runner import (
+from himalaya_vlm_eval import catalog
+from himalaya_vlm_eval.models.base import FatalModelError, Model, ModelError
+from himalaya_vlm_eval.registry import register_adapter
+from himalaya_vlm_eval.runner import (
     PREDICTIONS,
     RESULT,
+    RUN_META,
     SCORES,
     RunAborted,
     RunOptions,
@@ -18,8 +19,8 @@ from nepeval_ocr.runner import (
     latest_records,
     load_result,
 )
-from nepeval_ocr.schema import ModelInfo
-from nepeval_ocr.types import Generation
+from himalaya_vlm_eval.schema import ModelInfo
+from himalaya_vlm_eval.types import Generation
 
 BEHAVIOUR: dict = {}
 
@@ -113,7 +114,7 @@ def test_different_params_get_a_different_run_dir(tmp_path, bench):
 
 
 def test_subset_is_seeded_and_not_the_head(bench):
-    from nepeval_ocr.benchmarks import NativeBenchmark
+    from himalaya_vlm_eval.benchmarks import NativeBenchmark
 
     nb = NativeBenchmark(bench)
     ids1 = [s.id for s in nb.load(3, seed=1).samples]
@@ -132,7 +133,7 @@ def test_fatal_error_stops_run(tmp_path, bench):
 
 
 def test_consecutive_errors_abort(tmp_path, bench, monkeypatch):
-    import nepeval_ocr.runner as R
+    import himalaya_vlm_eval.runner as R
 
     monkeypatch.setattr(R, "_preflight", lambda *a, **k: None)
     with pytest.raises(RunAborted, match="consecutive"):
@@ -157,7 +158,7 @@ def test_torn_last_line_is_tolerated(tmp_path, bench):
 
 
 def test_ocr_engine_refuses_vqa(tmp_path):
-    from nepeval_ocr.models.ocr_engines import TesseractModel  # noqa: F401
+    from himalaya_vlm_eval.models.ocr_engines import TesseractModel  # noqa: F401
 
     tess = catalog.models()["tesseract-nep"]
     with pytest.raises(Unsupported):
@@ -186,7 +187,7 @@ def test_evaluate_is_idempotent_and_tracks_scoring_changes(tmp_path, bench, mani
 
 
 def test_resume_preflights_on_a_fresh_sample(tmp_path, bench, monkeypatch):
-    import nepeval_ocr.runner as R
+    import himalaya_vlm_eval.runner as R
 
     run_dir = infer(entry(concurrency=1), bench, tmp_path, options=RunOptions(limit=3))
     # Mark the first sample failed and drop the rest: resume must not preflight on s-failed.
@@ -203,8 +204,8 @@ def test_resume_preflights_on_a_fresh_sample(tmp_path, bench, monkeypatch):
 
 def test_cli_concurrency_works_for_engines_without_that_param(tmp_path, manifest_catalog,
                                                              caplog, monkeypatch):
-    from nepeval_ocr.cli import main
-    from nepeval_ocr.models import ocr_engines
+    from himalaya_vlm_eval.cli import main
+    from himalaya_vlm_eval.models import ocr_engines
 
     monkeypatch.setattr(ocr_engines.TesseractModel, "setup", lambda self: None)
     monkeypatch.setattr(ocr_engines.TesseractModel, "_recognize", lambda self, img: "नमस्कार")
@@ -212,3 +213,13 @@ def test_cli_concurrency_works_for_engines_without_that_param(tmp_path, manifest
                "--work-dir", str(tmp_path), "--no-publish"])
     assert rc == 0, caplog.text
     assert "bad params" not in caplog.text
+
+
+def test_runs_saved_before_the_rename_still_evaluate(tmp_path, bench, manifest_catalog):
+    _answers(manifest_catalog["texts"])
+    run_dir = infer(entry(concurrency=1), bench, tmp_path)
+    meta = json.loads((run_dir / RUN_META).read_text())
+    env = meta["environment"]
+    env["nepeval_ocr"] = env.pop("himalaya_vlm_eval")
+    (run_dir / RUN_META).write_text(json.dumps(meta))
+    assert evaluate(run_dir).source.harness_version == env["nepeval_ocr"]

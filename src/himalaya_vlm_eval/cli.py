@@ -1,14 +1,14 @@
-"""`nepeval` command line.
+"""`himeval` command line.
 
-    nepeval list models | benchmarks [--category math]
-    nepeval run --model glm-ocr-nepali,gpt-4o --bench nepalipixel,category:math [--limit 500]
-    nepeval eval results/runs/<dir>            re-score saved predictions
-    nepeval publish results/runs/<dir>         push to NEPEVAL_STORE
-    nepeval import results.json                publish numbers from another leaderboard
-    nepeval leaderboard nepalipixel            print a board from the store
-    nepeval serve                              results API
+    himeval list models | benchmarks [--category math]
+    himeval run --model glm-ocr-nepali,gpt-4o --bench nepalipixel,category:math [--limit 500]
+    himeval eval results/runs/<dir>            re-score saved predictions
+    himeval publish results/runs/<dir>         push to HIMEVAL_STORE
+    himeval import results.json                publish numbers from another leaderboard
+    himeval leaderboard nepalipixel            print a board from the store
+    himeval serve                              results API
 
-`run` publishes every finished result to NEPEVAL_STORE unless --no-publish.
+`run` publishes every finished result to HIMEVAL_STORE unless --no-publish.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ import yaml
 
 from . import __version__
 
-log = logging.getLogger("nepeval")
+log = logging.getLogger("himeval")
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -116,7 +116,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not args.no_publish:
         store = _store(args.store, required=False)
         if store is None:
-            log.warning("NEPEVAL_STORE not set: results stay local (pass --store or --no-publish)")
+            log.warning("HIMEVAL_STORE not set: results stay local (pass --store or --no-publish)")
 
     vl_settings = None
     vl_classes: dict[str, str] = {}
@@ -283,9 +283,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="nepeval", description=__doc__,
+    p = argparse.ArgumentParser(prog="himeval", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--version", action="version", version=f"nepeval-ocr {__version__}")
+    p.add_argument("--version", action="version", version=f"himalaya-vlm-eval {__version__}")
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -306,8 +306,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--concurrency", type=int)
     s.add_argument("--model-arg", action="append", default=[], metavar="KEY=VALUE",
                    help="override an adapter parameter (YAML value), repeatable")
-    s.add_argument("--work-dir", default=os.environ.get("NEPEVAL_WORK_DIR", "results"))
-    s.add_argument("--store", help="result store (default $NEPEVAL_STORE)")
+    s.add_argument("--work-dir", default=os.environ.get("HIMEVAL_WORK_DIR", "results"))
+    s.add_argument("--store", help="result store (default $HIMEVAL_STORE)")
     s.add_argument("--no-publish", action="store_true")
     s.add_argument("--max-error-rate", type=float, default=0.05)
     s.add_argument("--no-retry-errors", action="store_true",
@@ -346,7 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
     s.add_argument("--store")
     s.add_argument("--refresh-seconds", type=float,
-                   default=float(os.environ.get("NEPEVAL_REFRESH_SECONDS", "60")))
+                   default=float(os.environ.get("HIMEVAL_REFRESH_SECONDS", "60")))
     s.set_defaults(func=cmd_serve)
     return p
 

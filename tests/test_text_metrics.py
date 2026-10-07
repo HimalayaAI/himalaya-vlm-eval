@@ -2,8 +2,8 @@ import unicodedata
 
 import pytest
 
-from nepeval_ocr import metrics as M
-from nepeval_ocr import text as T
+from himalaya_vlm_eval import metrics as M
+from himalaya_vlm_eval import text as T
 
 
 def test_nfc_makes_decomposed_and_precomposed_nukta_equal():

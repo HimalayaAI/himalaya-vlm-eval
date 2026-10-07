@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "nepeval-ocr"
+name = "himalaya-vlm-eval"
 version = "0.2.0"
 description = "Benchmark harness and results API for OCR, document, chart, math and chat VLM benchmarks, Nepali-first."
 readme = "README.md"
@@ -47,10 +47,10 @@ dev = [
 ]
 
 [project.scripts]
-nepeval = "nepeval_ocr.cli:main"
+himeval = "himalaya_vlm_eval.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nepeval_ocr"]
+packages = ["src/himalaya_vlm_eval"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

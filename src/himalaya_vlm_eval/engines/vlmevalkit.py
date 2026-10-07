@@ -8,9 +8,9 @@ is never imported here:
     export VLMEVALKIT_DIR=~/src/VLMEvalKit VLMEVALKIT_PYTHON=~/src/VLMEvalKit/.venv/bin/python
 
 Judge (for math/chat/chart suites; MCQ suites fall back to exact matching without one):
-    NEPEVAL_JUDGE_MODEL     default gpt-4o-mini  (OpenRouter-style ids with "/" work via LOCAL_LLM)
-    NEPEVAL_JUDGE_BASE_URL  default https://api.openai.com/v1
-    NEPEVAL_JUDGE_API_KEY   falls back to OPENAI_API_KEY
+    HIMEVAL_JUDGE_MODEL     default gpt-4o-mini  (OpenRouter-style ids with "/" work via LOCAL_LLM)
+    HIMEVAL_JUDGE_BASE_URL  default https://api.openai.com/v1
+    HIMEVAL_JUDGE_API_KEY   falls back to OPENAI_API_KEY
 
 Guard rails, from reading VLMEvalKit's source (docs/VLMEVALKIT.md):
 - a `.env` in the checkout silently overrides our environment → refused;
@@ -39,7 +39,7 @@ from ..models.openai_compat import OpenAICompatModel, TarkaOCRModel
 from ..runner import Unsupported
 from ..schema import MetricValue, RunResult, SourceInfo, utcnow
 
-log = logging.getLogger("nepeval")
+log = logging.getLogger("himeval")
 
 FAIL_PREFIX = "Failed to obtain answer"
 
@@ -71,9 +71,9 @@ class VLMEvalSettings:
             repo=Path(repo).expanduser(),
             python=os.environ.get("VLMEVALKIT_PYTHON", sys.executable),
             api_nproc=int(os.environ.get("VLMEVALKIT_API_NPROC", "16")),
-            judge_model=os.environ.get("NEPEVAL_JUDGE_MODEL", "gpt-4o-mini"),
-            judge_base_url=os.environ.get("NEPEVAL_JUDGE_BASE_URL", "https://api.openai.com/v1"),
-            judge_key=os.environ.get("NEPEVAL_JUDGE_API_KEY") or os.environ.get("OPENAI_API_KEY"),
+            judge_model=os.environ.get("HIMEVAL_JUDGE_MODEL", "gpt-4o-mini"),
+            judge_base_url=os.environ.get("HIMEVAL_JUDGE_BASE_URL", "https://api.openai.com/v1"),
+            judge_key=os.environ.get("HIMEVAL_JUDGE_API_KEY") or os.environ.get("OPENAI_API_KEY"),
         )
 
     def check(self) -> None:
@@ -99,7 +99,7 @@ def _judge_plan(settings: VLMEvalSettings, judge_use: str, bench_id: str
     if not settings.judge_key:
         if judge_use == "required":
             raise VLMEvalError(
-                f"{bench_id} needs an LLM judge: set NEPEVAL_JUDGE_API_KEY (or OPENAI_API_KEY)"
+                f"{bench_id} needs an LLM judge: set HIMEVAL_JUDGE_API_KEY (or OPENAI_API_KEY)"
             )
         return ["--judge", "exact_matching"], {}, "exact_matching"
     env = {"OPENAI_API_KEY": settings.judge_key,
@@ -129,12 +129,12 @@ def resolve_dataset_classes(settings: VLMEvalSettings, names: list[str]) -> dict
         "    for c in DATASET_CLASSES:\n"
         "        if n in c.supported_datasets():\n"
         "            out[n]=c.__name__; break\n"
-        "print('NEPEVAL_CLASSES='+json.dumps(out))\n"
+        "print('HIMEVAL_CLASSES='+json.dumps(out))\n"
     )
     proc = subprocess.run([settings.python, "-c", code, json.dumps(names)], cwd=settings.repo,
                           capture_output=True, text=True, env=_child_env(settings, {}))
     for line in proc.stdout.splitlines():
-        if line.startswith("NEPEVAL_CLASSES="):
+        if line.startswith("HIMEVAL_CLASSES="):
             found = json.loads(line.split("=", 1)[1])
             missing = [n for n in names if n not in found]
             if missing:

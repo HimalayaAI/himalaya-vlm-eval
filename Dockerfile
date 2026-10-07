@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1
-# nepeval results API — the image the studio deploy pulls (ghcr.io/himalayaai/nepeval-api).
+# himeval results API — the image the studio deploy pulls (ghcr.io/himalayaai/himalaya-vlm-eval-api).
 #
 # Read-only and small: the core (pydantic, yaml) plus the `api` and `s3` extras. No torch,
 # no datasets — it shares a 2 GB host with the studio. Build for the studio host with
-#   docker buildx build --platform linux/arm64 -t ghcr.io/himalayaai/nepeval-api:<sha> .
+#   docker buildx build --platform linux/arm64 -t ghcr.io/himalayaai/himalaya-vlm-eval-api:<sha> .
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
@@ -21,20 +21,20 @@ RUN uv sync --locked --no-dev --extra api --extra s3 --no-editable
 
 FROM python:3.12-slim-bookworm AS runtime
 
-RUN useradd --system --create-home --uid 10001 nepeval
+RUN useradd --system --create-home --uid 10001 himeval
 WORKDIR /app
-COPY --from=builder --chown=nepeval:nepeval /app/.venv /app/.venv
+COPY --from=builder --chown=himeval:himeval /app/.venv /app/.venv
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    NEPEVAL_REFRESH_SECONDS=60
+    HIMEVAL_REFRESH_SECONDS=60
 
-USER nepeval
+USER himeval
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"
 
-# NEPEVAL_STORE (s3://bucket/prefix or a mounted path) is required at runtime.
-CMD ["nepeval", "serve", "--host", "0.0.0.0", "--port", "8000"]
+# HIMEVAL_STORE (s3://bucket/prefix or a mounted path) is required at runtime.
+CMD ["himeval", "serve", "--host", "0.0.0.0", "--port", "8000"]

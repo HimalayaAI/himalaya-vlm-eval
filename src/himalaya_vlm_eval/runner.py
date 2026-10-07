@@ -32,7 +32,7 @@ from .catalog import BenchmarkEntry, ModelEntry
 from .models.base import FatalModelError, Model, ModelError
 from .schema import MetricValue, RunResult, SourceInfo, utcnow
 
-log = logging.getLogger("nepeval")
+log = logging.getLogger("himeval")
 
 PREDICTIONS = "predictions.jsonl"
 SCORES = "scores.jsonl"
@@ -115,7 +115,7 @@ def infer(
     log.info("loading %s …", bench.info.id)
     loaded = bench.load(opts.limit, opts.seed)
     config = {
-        "harness": "nepeval-ocr",
+        "harness": "himalaya-vlm-eval",
         "model": model.describe(),
         "benchmark": bench.describe(),
         "subset": {"limit": opts.limit, "seed": opts.seed, "cases": len(loaded.samples)},
@@ -133,7 +133,7 @@ def infer(
             "benchmark": bench.info.model_dump(mode="json"),
             "started_at": utcnow().isoformat(),
             "environment": {
-                "nepeval_ocr": __version__,
+                "himalaya_vlm_eval": __version__,
                 "python": platform.python_version(),
                 "platform": platform.platform(),
             },
@@ -271,6 +271,11 @@ def _fmt_eta(seconds: float) -> str:
 # --- stage 2 -----------------------------------------------------------------------------
 
 
+def _harness_version(env: dict) -> str:
+    # runs saved before the rename recorded the package as `nepeval_ocr`
+    return env.get("himalaya_vlm_eval") or env.get("nepeval_ocr", "unknown")
+
+
 def evaluate(run_dir: Path, bench_entry: BenchmarkEntry | None = None,
              *, n_resamples: int = 1000) -> RunResult:
     """Score a run directory and write result.json. `bench_entry` defaults to the catalog
@@ -343,8 +348,8 @@ def evaluate(run_dir: Path, bench_entry: BenchmarkEntry | None = None,
         created_at=utcnow(),
         model=model_info,
         benchmark=BenchmarkInfo(**{**meta["benchmark"], **entry.info.model_dump()}),
-        source=SourceInfo(kind="measured", harness="nepeval-ocr",
-                          harness_version=meta["environment"]["nepeval_ocr"]),
+        source=SourceInfo(kind="measured", harness="himalaya-vlm-eval",
+                          harness_version=_harness_version(meta["environment"])),
         cases=len(per_sample),
         errors=errors,
         metrics=metric_values,

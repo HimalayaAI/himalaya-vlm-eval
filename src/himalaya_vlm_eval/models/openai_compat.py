@@ -241,7 +241,7 @@ class TarkaOCRModel(OpenAICompatModel):
     path = "/ocr"
 
     def __init__(self, model: str, base_url: str = "https://tarka.rest/v1",
-                 api_key_env: str | list[str] | None = ("TARKA_API_KEY", "NEPEVAL_API_TOKEN"),
+                 api_key_env: str | list[str] | None = ("TARKA_API_KEY", "HIMEVAL_API_TOKEN"),
                  **kwargs: Any) -> None:
         kwargs.setdefault("max_tokens", 4096)
         super().__init__(model, base_url, list(api_key_env or []), **kwargs)
