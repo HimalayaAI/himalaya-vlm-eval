@@ -211,3 +211,31 @@ def test_kv_wrapper_and_key_case():
                                   "FULL_NAME": "सीता राम पौडेल", "child": ["राम", "श्याम"]}},
                       ensure_ascii=False)
     assert S.score_kv(pred, [], KV)["kv_f1"] == 1.0
+
+
+# --- repeated field returned as one comma string (issue #10) -------------------------------
+
+ADDR = {"fields": [["name", "राम बहादुर"], ["address", "ठमेल, काठमाडौं"], ["address", "बागमती"]]}
+
+
+def test_kv_comma_string_keeps_gold_values_that_contain_a_comma():
+    pred = json.dumps({"name": "राम बहादुर", "address": "ठमेल, काठमाडौं, बागमती"}, ensure_ascii=False)
+    assert S.score_kv(pred, [], ADDR)["kv_f1"] == 1.0
+
+
+def test_kv_comma_string_newline_separated_and_no_space_after_comma():
+    for value in ("ठमेल, काठमाडौं\nबागमती", "ठमेल,काठमाडौं,बागमती"):
+        pred = json.dumps({"name": "राम बहादुर", "address": value}, ensure_ascii=False)
+        assert S.score_kv(pred, [], ADDR)["kv_f1"] == 1.0
+
+
+def test_kv_comma_string_plain_split_still_works_and_wrong_values_still_count():
+    pred = json.dumps({"child": "राम, श्याम, गोपाल"}, ensure_ascii=False)
+    s = S.score_kv(pred, [], KV)
+    assert s["kv_recall"] == 0.5 and s["kv_precision"] == pytest.approx(2 / 3)
+
+
+def test_split_multi_prefers_the_longest_gold_rejoin():
+    assert S._split_multi("क, ख, ग", ["क, ख", "ग"]) == ["क, ख", "ग"]
+    assert S._split_multi("क, ख, ग", ["क", "ख", "ग"]) == ["क", "ख", "ग"]
+    assert S._split_multi("क, ख, ग", []) == ["क", "ख", "ग"]

@@ -81,15 +81,40 @@ def _unwrap(pred: Any) -> Any:
     return pred
 
 
-def _pred_pairs(pred: Any, multi: set[str]) -> list[tuple[str, str]]:
+def _split_multi(value: str, gold_values: Sequence[str]) -> list[str]:
+    """Split a string holding several values of a repeated field.
+
+    Split on commas and newlines, but first try to put pieces back together when the joined
+    text is one of the gold values: `ठमेल, काठमाडौं, बागमती` for gold `ठमेल, काठमाडौं` +
+    `बागमती` must not become three values. The longest rejoin that matches a gold value wins;
+    anything else falls back to the plain split."""
+    pieces = [x for x in re.split(r"\s*[,\n]\s*", value) if x]
+    gold = set(gold_values)
+    out: list[str] = []
+    i = 0
+    while i < len(pieces):
+        for j in range(len(pieces), i + 1, -1):
+            joined = next((c for c in (", ".join(pieces[i:j]), ",".join(pieces[i:j]))
+                           if norm(c) in gold), None)
+            if joined is not None:
+                out.append(joined)
+                i = j
+                break
+        else:
+            out.append(pieces[i])
+            i += 1
+    return out
+
+
+def _pred_pairs(pred: Any, multi: dict[str, list[str]]) -> list[tuple[str, str]]:
+    """`multi` maps a repeated field id (case-folded) to its gold values."""
     pairs: list[tuple[str, str]] = []
     pred = _unwrap(pred)
-    multi_cf = {m.casefold() for m in multi}
     if isinstance(pred, dict):
         for k, v in pred.items():
             values = v if isinstance(v, list) else [v]
-            if not isinstance(v, list) and str(k).casefold() in multi_cf and isinstance(v, str):
-                values = [s for s in re.split(r"\s*[,\n]\s*", v) if s]
+            if not isinstance(v, list) and str(k).casefold() in multi and isinstance(v, str):
+                values = _split_multi(v, multi[str(k).casefold()])
             for item in values:
                 if item is None or (isinstance(item, str) and not item.strip()):
                     continue
@@ -111,7 +136,8 @@ def score_kv(pred: str, refs: Sequence[str], target: Any) -> Score:
     softer per-field view (mean best similarity of each gold value under its key).
     """
     gold = [(str(k), norm(v)) for k, v in target["fields"] if norm(v)]
-    multi = {k for k, _ in gold if sum(1 for g, _ in gold if g == k) > 1}
+    multi = {k.casefold(): [v for g, v in gold if g == k]
+             for k, _ in gold if sum(1 for g, _ in gold if g == k) > 1}
     parsed = extract_json(pred)
     # Field ids are matched case-insensitively ("Name" = "name"); values stay exact.
     canon = {k.casefold(): k for k, _ in gold}
