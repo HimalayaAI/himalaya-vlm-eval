@@ -233,3 +233,5 @@ uv run ruff check src tests && uv run pytest
 ```
 
 `docker build .` builds the API image; `docker/runner.Dockerfile` the runner.
+
+Going to production, releasing and publishing results: [docs/PRODUCTION.md](docs/PRODUCTION.md).
