@@ -160,3 +160,11 @@ def test_board_outside_the_layout_is_refused(tmp_path, monkeypatch):
     finally:
         monkeypatch.delenv("HIMEVAL_CATALOG")
         catalog.reload()
+
+
+def test_nepali_ocr_boards_rank_by_akshara_accuracy():
+    for bid in ("nepalipixel", "nepalipixel-docs-page"):
+        b = catalog.resolve_benchmark(bid)
+        assert b.info.primary_metric == "akshara_accuracy"
+        names = NativeBenchmark(b).metric_names
+        assert {"cer", "char_accuracy", "acer"} <= set(names)  # still reported alongside

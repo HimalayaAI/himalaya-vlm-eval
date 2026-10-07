@@ -18,7 +18,7 @@ from html.parser import HTMLParser
 from typing import Any
 
 from . import text as T
-from .metrics import anls, edit_distance
+from .metrics import acer, anls, edit_distance
 
 Score = dict[str, float | None]
 Scorer = Callable[[str, Sequence[str], Any], Score]
@@ -245,7 +245,7 @@ def score_reading_order(pred: str, refs: Sequence[str], target: Any,
     Each gold block is aligned to its most similar unused prediction line (similarity
     ≥ threshold). `reading_order` is Kendall's τ of the matched blocks' positions in the
     prediction, mapped to [0, 1]; `block_recall` is how many blocks were found at all.
-    Page-level `cer` is on the full text, so order mistakes also cost CER.
+    Page-level `cer` and `acer` are on the full text, so order mistakes also cost them.
     """
     gold_blocks = [T.canonical(b) for b in target["blocks"] if T.canonical(b)]
     out = T.clean_model_output(pred)
@@ -279,7 +279,10 @@ def score_reading_order(pred: str, refs: Sequence[str], target: Any,
     positions = [matched[gi] for gi in sorted(matched)]
     recall = len(positions) / len(gold_blocks) if gold_blocks else 1.0
     tau = _kendall_tau(positions)
+    page_acer = acer(pred_text, [gold_text])
     return {
+        "akshara_accuracy": max(0.0, 1.0 - page_acer),
+        "acer": page_acer,
         "cer": cer,
         "char_accuracy": max(0.0, 1.0 - cer),
         "reading_order": (tau + 1) / 2 if len(positions) >= 2 else None,
@@ -628,7 +631,8 @@ METRICS: dict[str, list[str]] = {
     "kv": ["kv_f1", "kv_precision", "kv_recall", "kv_value_sim", "kv_doc_exact", "kv_parse_ok"],
     "qa": ["qa_score", "anls_answerable", "false_abstention", "abstention_accuracy",
            "abstained_loose"],
-    "reading_order": ["cer", "char_accuracy", "reading_order", "block_recall"],
+    "reading_order": ["akshara_accuracy", "acer", "cer", "char_accuracy", "reading_order",
+                      "block_recall"],
     "table": ["teds", "teds_struct", "table_parse_ok"],
     "layout": ["layout_f1", "layout_precision", "layout_recall", "detection_f1",
                "layout_parse_ok"],
@@ -639,7 +643,8 @@ WORST: dict[str, Score] = {
     "kv": {"kv_f1": 0.0, "kv_precision": 0.0, "kv_recall": 0.0, "kv_value_sim": 0.0,
            "kv_doc_exact": 0.0, "kv_parse_ok": 0.0},
     "qa": {"qa_score": 0.0},
-    "reading_order": {"cer": 1.0, "char_accuracy": 0.0, "reading_order": None,
+    "reading_order": {"akshara_accuracy": 0.0, "acer": 1.0, "cer": 1.0, "char_accuracy": 0.0,
+                      "reading_order": None,
                       "block_recall": 0.0},
     "table": {"teds": 0.0, "teds_struct": 0.0, "table_parse_ok": 0.0},
     "layout": {"layout_parse_ok": 0.0, "layout_f1": 0.0, "layout_precision": 0.0,

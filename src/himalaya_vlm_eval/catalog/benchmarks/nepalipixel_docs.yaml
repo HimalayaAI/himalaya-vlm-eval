@@ -65,10 +65,10 @@
   board: document/nepali-page
   language: ne
   description: >-
-    Full-page transcription of a Nepali document. Character accuracy (1 − CER, capped) on
-    the page text in the generator's reading order; reading order itself is Kendall's τ
-    over matched blocks.
-  primary_metric: char_accuracy
+    Full-page transcription of a Nepali document. Akshara accuracy (1 − akshara error
+    rate, capped) on the page text in the generator's reading order; code-point CER is
+    reported alongside. Reading order itself is Kendall's τ over matched blocks.
+  primary_metric: akshara_accuracy
   higher_is_better: true
   scale_max: 1.0
   task: ocr

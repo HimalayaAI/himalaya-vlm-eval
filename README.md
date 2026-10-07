@@ -131,12 +131,12 @@ id: my-devanagari-set
 engine: native
 display_name: My Devanagari Set
 category: ocr
-primary_metric: char_accuracy
+primary_metric: akshara_accuracy   # char_accuracy for non-Devanagari text
 scale_max: 1.0
 task: ocr
 dataset: {source: hf, repo: org/dataset, revision: <sha>, split: test, image: image, references: text}
 prompt: Transcribe all text in this image exactly as written.
-metrics: [char_accuracy, cer, wer, exact_match]
+metrics: [akshara_accuracy, acer, cer, char_accuracy, wer, exact_match]
 ```
 
 Extra catalog directories load from `HIMEVAL_CATALOG=/path/a:/path/b` and override
