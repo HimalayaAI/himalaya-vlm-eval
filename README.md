@@ -75,6 +75,31 @@ What `run` does, per model × benchmark:
 
 One failing pair never stops the matrix; a summary table prints at the end.
 
+### Logs and resuming
+
+| Where | What |
+|---|---|
+| console | progress every 15 s (done/total, rate, ETA, errors, retried requests), the first 5 sample errors, an error summary by kind, the score with its CI |
+| `results/runs/<run>/run.log` | everything for that run at DEBUG: the full config, every sample's outcome and latency, every error and adapter retry with its reason, truncations, timings; appended across resumes |
+| `results/logs/run-<time>-<pid>.log` | the whole `himeval run` session, including tracebacks the console only summarises |
+| `results/vlmevalkit/<model>__<dataset>.log` | VLMEvalKit's own output; the console gets a heartbeat with its latest line every minute |
+
+`-v` shows the DEBUG lines on the console too.
+
+A run can be stopped at any point — Ctrl-C, `kill`, `docker stop`, a preempted cloud GPU,
+a dropped SSH session (SIGINT, SIGTERM and SIGHUP are all handled) — and **re-running the
+same command continues where it stopped**:
+
+- every answer is appended to `predictions.jsonl` as it arrives and synced to disk at
+  each progress report; a line torn by a hard kill is skipped on read;
+- on a stop, requests already in flight finish and are saved (a second Ctrl-C drops
+  them); queued samples are not started;
+- the run directory is keyed by a hash of model, parameters, benchmark and subset, so the
+  same command finds it; earlier errors are retried (`--no-retry-errors` keeps them);
+- in a matrix, finished pairs are skipped (their result is reused, publishing is
+  idempotent) and the stopped pair resumes;
+- VLMEvalKit runs use its `--reuse`, so its saved predictions are picked up the same way.
+
 | Command | |
 |---|---|
 | `himeval eval <run_dir>` | re-score saved predictions (after a scorer change) |

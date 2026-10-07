@@ -1,5 +1,8 @@
 import json
+import os
+import signal
 import threading
+import time
 
 import pytest
 
@@ -9,6 +12,7 @@ from himalaya_vlm_eval.registry import register_adapter
 from himalaya_vlm_eval.runner import (
     PREDICTIONS,
     RESULT,
+    RUN_LOG,
     RUN_META,
     SCORES,
     RunAborted,
@@ -49,6 +53,18 @@ class FakeModel(Model):
             raise ModelError("boom")
         if self.mode == "crash_after_2" and n > 2:
             raise KeyboardInterrupt
+        if self.mode in ("interrupt_third", "sigterm_third") and n > 1 \
+                and not BEHAVIOUR.get("calm"):
+            # call 3 stops the run while calls 2 and 4 are still in flight
+            if n == 3:
+                time.sleep(0.05)
+                if self.mode == "sigterm_third":
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    time.sleep(0.3)
+                else:
+                    raise KeyboardInterrupt
+            else:
+                time.sleep(0.3)
         return Generation(text=answer, latency_s=0.01, finish_reason="stop",
                           usage={"total_tokens": 7})
 
@@ -196,7 +212,8 @@ def test_resume_preflights_on_a_fresh_sample(tmp_path, bench, monkeypatch):
     (run_dir / PREDICTIONS).write_text(json.dumps(failed) + "\n")
     seen = []
     real = R._preflight
-    monkeypatch.setattr(R, "_preflight", lambda m, b, s, o: (seen.append(s.id), real(m, b, s, o)))
+    monkeypatch.setattr(R, "_preflight",
+                        lambda m, b, s, *rest: (seen.append(s.id), real(m, b, s, *rest)))
     infer(entry(concurrency=1), bench, tmp_path, options=RunOptions(limit=3))
     assert seen and seen[0] != failed["sample_id"]
     assert all(r["ok"] for r in latest_records(run_dir / PREDICTIONS).values())
@@ -223,3 +240,50 @@ def test_runs_saved_before_the_rename_still_evaluate(tmp_path, bench, manifest_c
     env["nepeval_ocr"] = env.pop("himalaya_vlm_eval")
     (run_dir / RUN_META).write_text(json.dumps(meta))
     assert evaluate(run_dir).source.harness_version == env["nepeval_ocr"]
+
+
+def test_interrupt_saves_in_flight_answers(tmp_path, bench):
+    with pytest.raises(KeyboardInterrupt):
+        infer(entry("interrupt_third", concurrency=3), bench, tmp_path)
+    run_dir = next((tmp_path / "runs").iterdir())
+    saved = latest_records(run_dir / PREDICTIONS)
+    assert len(saved) >= 3 and all(r["ok"] for r in saved.values())  # pre-flight + 2 in flight
+    log_text = (run_dir / RUN_LOG).read_text()
+    assert "saving" in log_text and "Re-run the same command to resume" in log_text
+    BEHAVIOUR["calm"] = True  # the endpoint recovers; same config hash → same dir, resumes
+    try:
+        infer(entry("interrupt_third", concurrency=3), bench, tmp_path)
+    finally:
+        BEHAVIOUR.pop("calm")
+    assert len(latest_records(run_dir / PREDICTIONS)) == 5
+    assert "resuming" in (run_dir / RUN_LOG).read_text()
+
+
+def test_run_log_records_every_error_and_the_config(tmp_path, bench, caplog):
+    with pytest.raises(RunAborted):
+        infer(entry("always_error", concurrency=1), bench, tmp_path)
+    run_dir = infer(entry("error_second", concurrency=1), bench, tmp_path)
+    text = (run_dir / RUN_LOG).read_text()
+    assert "config " in text and '"adapter": "fake"' in text
+    assert "error on" in text and "boom" in text
+    assert "errors by kind: 1× boom" in text
+    assert "inference done" in text
+    evaluate(run_dir)
+    assert "scored " in (run_dir / RUN_LOG).read_text()
+
+
+def test_sigterm_stops_the_whole_matrix_and_resumes(tmp_path, manifest_catalog, monkeypatch):
+    from himalaya_vlm_eval.cli import main
+
+    monkeypatch.setattr(catalog, "resolve_model",
+                        lambda name: entry(name, concurrency=3) if name != "fake-b"
+                        else entry(concurrency=3))
+    before = signal.getsignal(signal.SIGTERM)
+    rc = main(["run", "--model", "sigterm_third,fake-b", "--bench", "local-ocr",
+               "--work-dir", str(tmp_path), "--no-publish"])
+    assert rc == 1 and signal.getsignal(signal.SIGTERM) == before  # handler restored
+    runs = list((tmp_path / "runs").iterdir())
+    assert len(runs) == 1  # the second model never started
+    assert len(latest_records(runs[0] / PREDICTIONS)) >= 3
+    session = next((tmp_path / "logs").iterdir()).read_text()
+    assert "SIGTERM" in session and "re-run the same command" in session

@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -268,6 +269,51 @@ def latest_run_dir(work_dir: Path, alias: str) -> Path:
 # --- running ------------------------------------------------------------------------------
 
 
+def _run_streaming(cmd: list[str], settings: VLMEvalSettings, judge_env: dict[str, str],
+                   log_path: Path, *, label: str, heartbeat_s: float = 60.0) -> int:
+    """Run VLMEvalKit, copying its output to `log_path` line by line and logging a
+    heartbeat with its latest line, so a run of several hours is never silent. If we are
+    interrupted, the child is stopped too; its finished predictions stay in the work dir
+    and `--reuse` picks them up on the next run."""
+    started = last_beat = time.monotonic()
+    last_line = ""
+    with log_path.open("a", encoding="utf-8") as logf:
+        logf.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} {' '.join(cmd)}\n")
+        proc = subprocess.Popen(cmd, cwd=settings.repo, env=_child_env(settings, judge_env),
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                encoding="utf-8", errors="replace", bufsize=1)
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                logf.write(line)
+                logf.flush()
+                # tqdm redraws with \r; keep the latest frame
+                if text := line.rstrip().rsplit("\r", 1)[-1].strip():
+                    last_line = text
+                now = time.monotonic()
+                if now - last_beat >= heartbeat_s:
+                    last_beat = now
+                    log.info("  vlmevalkit %s running %s: %s", label,
+                             _elapsed(now - started), last_line[:160])
+            return proc.wait()
+        except BaseException:
+            log.warning("stopping VLMEvalKit (%s); finished predictions are kept for --reuse",
+                        label)
+            proc.terminate()
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            raise
+
+
+def _elapsed(seconds: float) -> str:
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    return f"{h}h{m:02d}m" if h else f"{m}m{s:02d}s"
+
+
 def run_benchmark(model_entry: ModelEntry, bench: BenchmarkEntry, work_dir: Path,
                   settings: VLMEvalSettings, *, model_overrides: dict[str, Any] | None = None,
                   dataset_class: str | None = None) -> RunResult:
@@ -295,16 +341,20 @@ def run_benchmark(model_entry: ModelEntry, bench: BenchmarkEntry, work_dir: Path
     cmd = [settings.python, "run.py", "--config", str(cfg_path), "--work-dir", str(vl_work),
            "--mode", "all", "--api-nproc", str(settings.api_nproc), "--reuse", *judge_args]
     log_path = vl_work / f"{alias}__{dataset}.log"
+    prior = sorted((vl_work / alias).glob(f"T*/{alias}_{dataset}*"))
+    if prior:
+        log.info("vlmevalkit: reusing %d earlier output file(s) for %s on %s (--reuse)",
+                 len(prior), alias, dataset)
     log.info("vlmevalkit: %s on %s (judge: %s) → %s", alias, dataset, judge_name, log_path)
+    log.debug("vlmevalkit command: %s", " ".join(cmd))
     try:
-        with log_path.open("a", encoding="utf-8") as logf:
-            proc = subprocess.run(cmd, cwd=settings.repo, env=_child_env(settings, judge_env),
-                                  stdout=logf, stderr=subprocess.STDOUT)
+        returncode = _run_streaming(cmd, settings, judge_env, log_path,
+                                    label=f"{alias} × {dataset}")
     finally:
         cfg_path.unlink(missing_ok=True)
-    if proc.returncode != 0:
+    if returncode != 0:
         tail = log_path.read_text("utf-8", errors="replace")[-2000:]
-        raise VLMEvalError(f"VLMEvalKit exited {proc.returncode} on {dataset}:\n{tail}")
+        raise VLMEvalError(f"VLMEvalKit exited {returncode} on {dataset}:\n{tail}")
 
     run_dir = latest_run_dir(vl_work, alias)
     status = json.loads((run_dir / "status.json").read_text("utf-8"))

@@ -14,7 +14,7 @@ PROMPT = Prompt("read it", system="sys")
 def _model(server, **kw):
     kw.setdefault("retries", 3)
     m = OpenAICompatModel("vision-1", server.url, "TEST_KEY", **kw)
-    m._sleep = lambda attempt, retry_after: None  # no real backoff in tests
+    m._sleep = lambda *a: None  # no real backoff in tests
     return m
 
 
