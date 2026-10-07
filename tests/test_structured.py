@@ -169,3 +169,45 @@ def test_every_scorer_declares_metrics_and_worst_case():
     assert set(S.SCORERS) == set(S.METRICS) == set(S.WORST)
     for name, worst in S.WORST.items():
         assert set(worst) <= set(S.METRICS[name])
+
+
+# --- regressions found in review (7 Oct 2026) ---------------------------------------------
+
+
+def test_reading_order_garbled_line_does_not_steal_neighbour():
+    gold = ["कुल रकम: १०००", "कुल रकम: २०००", "हस्ताक्षर"]
+    pred = "कुल रकम १०\nकुल रकम: २०००\nहस्ताक्षर"  # correct order, first line has OCR errors
+    s = S.score_reading_order(pred, [], {"blocks": gold})
+    assert s["reading_order"] == 1.0 and s["block_recall"] == 1.0
+
+
+def test_reading_order_reversed_pair_still_scores_zero():
+    gold = ["पहिलो खण्ड", "दोस्रो खण्ड"]
+    s = S.score_reading_order("दोस्रो खण्ड\nपहिलो खण्ड", [], {"blocks": gold})
+    assert s["reading_order"] == 0.0
+
+
+GOLD_BOX = {"regions": [{"role": "title", "box": [0.1, 0.2, 0.5, 0.4]}]}
+
+
+@pytest.mark.parametrize("key,box", [
+    ("bbox", [100, 200, 500, 400]),        # 0-1000 grid, x0 y0 x1 y1 (the prompt's format)
+    ("box_2d", [200, 100, 400, 500]),      # Gemini convention: y0 x0 y1 x1
+    ("bbox", [0.1, 0.2, 0.5, 0.4]),        # 0-1 floats
+])
+def test_layout_accepts_common_box_formats(key, box):
+    pred = json.dumps([{"role": "title", key: box}])
+    assert S.score_layout(pred, [], GOLD_BOX)["layout_f1"] == 1.0
+
+
+def test_layout_pixels_need_page_size():
+    target = {**GOLD_BOX, "size": [2000, 2800]}
+    pred = json.dumps([{"role": "title", "bbox": [200, 560, 1000, 1120]}])
+    assert S.score_layout(pred, [], target)["layout_f1"] == 1.0
+
+
+def test_kv_wrapper_and_key_case():
+    pred = json.dumps({"fields": {"Citizenship_Number": "४२-४२-२०५८-००५६३",
+                                  "FULL_NAME": "सीता राम पौडेल", "child": ["राम", "श्याम"]}},
+                      ensure_ascii=False)
+    assert S.score_kv(pred, [], KV)["kv_f1"] == 1.0
