@@ -1,0 +1,93 @@
+# NepalPixel VLM Bench (himalaya-ai/nepalpixel-vlm-bench, CC BY-NC 4.0 — evaluation use):
+# 2,130 synthetic Nepali government documents across 213 document types, read off the page
+# as a model sees them. Three configs, three benchmarks, scored exactly as the dataset's own
+# score_vlm_bench.py at this revision does (himalaya_vlm_eval/vlm_bench.py): NFC +
+# whitespace normalisation, no digit folding.
+#
+# `--limit N` draws N rows of the config with the run's seed — N documents for kie, whose
+# samples are their questions (about 15 each). The set is gated: accept its terms on
+# Hugging Face with the account whose token the runner uses.
+
+- id: nepalpixel-vlm-kie
+  engine: native
+  display_name: NepalPixel VLM Bench · KIE
+  category: document
+  board: document/nepali-qa
+  language: ne
+  description: >-
+    Nepali questions about the fields printed on a Nepali government document (32,224
+    questions over 2,130 documents, 213 types). ANLS (τ = 0.5) per question after NFC and
+    whitespace normalisation; Devanagari and European digits are not folded, so reading
+    २०४९ as 2049 is an error. Exact match alongside.
+  url: https://huggingface.co/datasets/himalaya-ai/nepalpixel-vlm-bench
+  primary_metric: anls
+  higher_is_better: true
+  scale_max: 1.0
+  full_cases: 32224
+  version: "1"
+  task: vqa
+  scorer: vlm_kie
+  dataset: &vlmbench
+    source: nepalpixel_vlm_bench
+    repo: himalaya-ai/nepalpixel-vlm-bench
+    revision: 274aa2780b2bfc74d773efdf6d92651fdde3d69c
+    split: test
+    view: kie
+  # The same prompt as the abstain config: abstention is only a fair test if the model was
+  # told it may abstain on every question, not only on the ones whose answer was erased.
+  prompt: &ask >-
+    Answer the question using only text visible in this document image, copying the answer
+    exactly as printed. If the answer is not on the page, reply exactly: ANSWER NOT PRESENT
+
+    Question: {question}
+  breakdowns: [category]
+
+- id: nepalpixel-vlm-ocr
+  engine: native
+  display_name: NepalPixel VLM Bench · Page OCR
+  category: document
+  board: document/nepali-page
+  language: ne
+  description: >-
+    Transcribe a whole Nepali government document page (2,948 pages, 2,600–3,400 px wide,
+    clean to heavily worn). Character error rate micro-averaged over pages — every edit over
+    every reference character — after NFC and whitespace normalisation, as the dataset's
+    scorer defines it. Lower is better.
+  url: https://huggingface.co/datasets/himalaya-ai/nepalpixel-vlm-bench
+  primary_metric: cer
+  higher_is_better: false
+  scale_max: 1.0
+  full_cases: 2948
+  version: "1"
+  task: ocr
+  scorer: vlm_ocr
+  dataset: {<<: *vlmbench, view: ocr_layout}
+  prompt: >-
+    Transcribe all text on this document page exactly as written, in reading order,
+    preserving the original script, spelling, digits and punctuation. Output only the
+    transcription, with no commentary, translation or formatting.
+  breakdowns: [category]
+
+- id: nepalpixel-vlm-abstain
+  engine: native
+  display_name: NepalPixel VLM Bench · Abstention
+  category: document
+  board: document/nepali-qa
+  language: ne
+  description: >-
+    The KIE question asked of a copy of the page with that field's value painted out (2,097
+    pages). Abstention: the share answered exactly "ANSWER NOT PRESENT". Leak, recorded
+    beside it: the share that reproduced the erased value anyway — answering from the
+    document type's prior rather than the pixels. Read it next to KIE: abstaining on
+    everything scores 1.0 here and 0 there.
+  url: https://huggingface.co/datasets/himalaya-ai/nepalpixel-vlm-bench
+  primary_metric: abstention
+  higher_is_better: true
+  scale_max: 1.0
+  full_cases: 2097
+  version: "1"
+  task: vqa
+  scorer: vlm_abstain
+  dataset: {<<: *vlmbench, view: abstain}
+  prompt: *ask
+  breakdowns: [category]

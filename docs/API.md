@@ -58,7 +58,7 @@ catalog defines is listed, with or without results (`models: 0`).
  {"id": "document", "label": "Document", "categories": […]}]}
 ```
 
-Types: `vision · document`. Vision categories: `ocr · nepali-ocr · chart · math · chat ·
+Types: `vision · document`. Vision categories: `nepali-ocr · ocr · chart · math · chat ·
 general · hallucination`. Document: `nepali-fields · nepali-qa · nepali-page ·
 nepali-table · nepali-layout · doc-qa · parsing`. Every category holds at least one suite
 this harness runs. These ids are the studio's vocabulary; changing one is a change in both repos.
