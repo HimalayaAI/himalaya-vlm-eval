@@ -22,8 +22,15 @@ def test_run_publishes_and_api_serves(tmp_path, manifest_catalog, mock_openai, m
 
     mock_openai.handler = handler
     monkeypatch.setenv("VLLM_BASE_URL", mock_openai.url)
+    # On the board only as a catalog model, reached like the self-hosted comparison set.
+    (manifest_catalog["catalog"] / "models" / "local.yaml").write_text(
+        "- id: local-vision\n  display_name: local-vision\n  adapter: openai_compat\n"
+        "  params: {model: local/vision, base_url_env: VLLM_BASE_URL, api_key_env: null}\n",
+        "utf-8")
+    from himalaya_vlm_eval import catalog
+    catalog.reload()
     store_dir = tmp_path / "store"
-    rc = main(["run", "--model", "vllm:local/vision", "--bench", "local-ocr",
+    rc = main(["run", "--model", "local-vision", "--bench", "local-ocr",
                "--work-dir", str(tmp_path / "w"), "--store", str(store_dir)])
     assert rc == 0
     out = capsys.readouterr().out
@@ -36,7 +43,7 @@ def test_run_publishes_and_api_serves(tmp_path, manifest_catalog, mock_openai, m
         assert board[0]["cases"] == 5 and board[0]["metrics"]["exact_match"] == 0.2
 
     # Re-running is a no-op resume and an idempotent publish.
-    rc = main(["run", "--model", "vllm:local/vision", "--bench", "local-ocr",
+    rc = main(["run", "--model", "local-vision", "--bench", "local-ocr",
                "--work-dir", str(tmp_path / "w"), "--store", str(store_dir)])
     assert rc == 0 and len(mock_openai.requests) == 5
 

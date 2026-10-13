@@ -4,6 +4,11 @@ Read-only view of the result store. Internal: the studio backend calls it over t
 compose network and the browser never does. If `HIMEVAL_API_TOKEN` is set, every `/v1`
 route requires `Authorization: Bearer <token>`; `/health` stays open for probes.
 
+**Board routes show measured runs of catalog models only** (picked 2026-10-13):
+`/v1/boards`, `/v1/benchmarks`, `/v1/models` and both `/v1/leaderboard` routes rank
+`source.kind == "measured"` results of models listed in the catalog, and nothing else. An
+imported number or an ad-hoc model is still stored and listed under `/v1/runs`.
+
 Responses carry `ETag` and `Cache-Control: private, max-age=30`; send `If-None-Match` to
 get `304`. The ETag changes only when the store's contents change.
 
@@ -21,7 +26,7 @@ that failed validation — they are skipped, never served.
 
 ## `GET /v1/benchmarks?category=`
 
-Every catalog benchmark plus any only known from results.
+Every catalog benchmark.
 
 ```json
 {"data": [{"id": "nepalipixel", "display_name": "NepaliPixel OCR", "category": "ocr",
@@ -34,35 +39,29 @@ Every catalog benchmark plus any only known from results.
 `models: 0` means listed but not yet run — the UI can hide those.
 
 BenchmarkInfo also carries `board` (`"vision/ocr"`, see `/v1/boards`), `style_control`
-(`true`/`false` on Arena boards, `null` elsewhere) and `cases_unit` (`cases`, or `votes`
-on Arena boards). `scale_max: null` marks an unbounded rating (Arena), which has no
-`score_100` and never enters the overview.
+(`null` on every current board) and `cases_unit` (`cases`). `scale_max: null` would mark an
+unbounded rating, which has no `score_100` and never enters the overview; no current
+benchmark is one.
 
 ## `GET /v1/boards`
 
 The leaderboard layout from `catalog/boards.yaml`: top-bar types → side-list categories →
-the boards in each. A category with several boards shows a switcher; Arena boards come in
-pairs that differ only in `style_control` (`true` is Arena's default view). Every board the
+the boards in each. A category with several boards shows a switcher. Every board the
 catalog defines is listed, with or without results (`models: 0`).
 
 ```json
 {"types": [{"id": "vision", "label": "Vision", "categories": [
   {"id": "ocr", "label": "OCR", "boards": [
-    {"benchmark": "arena-vision-ocr", "display_name": "Vision Arena · OCR", "engine": "arena",
-     "style_control": true, "primary_metric": "arena_score", "higher_is_better": true,
-     "scale_max": null, "cases_unit": "votes", "models": 115, "updated_at": "2026-10-02T00:00:00+00:00"},
-    {"benchmark": "arena-vision-ocr-no-style-control", "style_control": false, …},
     {"benchmark": "ocrbench", "engine": "vlmevalkit", "style_control": null,
      "scale_max": 1000, "cases_unit": "cases", "models": 0, "updated_at": null, …}]},
   {"id": "nepali-ocr", "label": "Nepali OCR", "boards": [{"benchmark": "nepalipixel", …}]}]},
  {"id": "document", "label": "Document", "categories": […]}]}
 ```
 
-Types: `vision · document`. Vision categories: `overall · english · chinese · captioning ·
-creative-writing · diagram · entity-recognition · homework · humor · ocr` (Arena's) then
-`nepali-ocr · chart · math · chat · general · hallucination`. Document: `overall` (Arena)
-then `nepali-fields · nepali-qa · nepali-page · nepali-table · nepali-layout · doc-qa ·
-parsing`. These ids are the studio's vocabulary; changing one is a change in both repos.
+Types: `vision · document`. Vision categories: `ocr · nepali-ocr · chart · math · chat ·
+general · hallucination`. Document: `nepali-fields · nepali-qa · nepali-page ·
+nepali-table · nepali-layout · doc-qa · parsing`. Every category holds at least one suite
+this harness runs. These ids are the studio's vocabulary; changing one is a change in both repos.
 
 ## `GET /v1/models`
 
@@ -74,21 +73,20 @@ unknown (see *Prices* below).
 ## `GET /v1/leaderboard/{benchmark_id}`
 
 Query filters: `kind`, `open_weights` (the studio's *License type*: `true` open,
-`false` proprietary), `org` (comma list), `include_imported` (default true),
-`include_subsets` (default true), and ranges `score_min`/`score_max`,
+`false` proprietary), `org` (comma list), `include_subsets` (default true), and ranges `score_min`/`score_max`,
 `input_price_min`/`input_price_max`, `output_price_min`/`output_price_max` ($ per 1M
 tokens), `context_min`/`context_max` (tokens). A row whose value is unknown (no price) is
 dropped only when that range is set. Ranks are recomputed over the filtered rows.
 
 ```json
 {"benchmark": {…BenchmarkInfo},
- "bounds": {"score": [1091, 1327], "input_price": [0.02, 15], "output_price": [0.1, 75],
-            "context_length": [16384, 1100000]},
- "attribution": "Arena leaderboard dataset … licensed CC BY 4.0.", "data_license": "CC-BY-4.0",
- "meta_generated_at": "2026-10-07T08:34:33+00:00",
- "data": [{"rank": 1, "rank_worst": 8, "position": 1, "model": {…ModelInfo},
-           "pricing": {"input": 10, "output": 50, "blended": 20, "source": "openrouter:anthropic/claude-fable-5"},
-           "context_length": 1000000, "pareto": true,
+ "bounds": {"score": [0.41, 0.93], "input_price": [0.05, 0.1], "output_price": [0.1, 0.1],
+            "context_length": [131072, 262144]},
+ "attribution": null, "data_license": null,
+ "meta_generated_at": "2026-10-13T08:34:33+00:00",
+ "data": [{"rank": 1, "rank_worst": 2, "position": 1,
+           "model": {"id": "himalaya-gemma-4-bf16", "org": "HimalayaAI", "params_b": 5.12, …},
+           "pricing": null, "context_length": null, "pareto": false,
            "score": 0.912, "ci_low": 0.905, "ci_high": 0.919, "score_100": 91.2,
            "metrics": {"char_accuracy": 0.912, "cer": 0.101, "wer": 0.21, …},
            "cases": 2000, "errors": 3, "partial": true,
@@ -100,22 +98,19 @@ dropped only when that range is set. Ranks are recomputed over the filtered rows
 - `rank` — LMArena-style: 1 + models statistically better (non-overlapping 95% CI).
   Ties are expected; render "1", "1", "3".
 - `rank_worst` — 1 + every model whose CI reaches above this one's: the worst rank the
-  data allows. `rank`–`rank_worst` is Arena's *rank spread* (verified equal to arena.ai's
-  on the Vision/OCR board, 2026-10-07).
-- `position` — plain ordinal by point score; Arena's *Rank* column.
+  data allows. `rank`–`rank_worst` is the *rank spread*.
+- `position` — plain ordinal by point score; the *Rank* column.
 - `pricing` / `context_length` — joined from `meta/models.json` at serve time; `null` when
-  unknown. `pricing.blended` = (3 × input + output) / 4, Arena's Pareto x-axis.
+  unknown — always for a model we serve ourselves. `pricing.blended` = (3 × input + output) / 4.
 - `pareto` — on the price/performance frontier: no cheaper-or-equal priced model scores
   higher. Unpriced models never are.
 - `score` is on the benchmark's scale (`scale_max`, direction `higher_is_better`);
   `score_100` maps it to 0–100 higher-is-better for cross-suite display.
 - `partial` — the run used a subset (`cases < full_cases`). Show it.
-- `source.kind` — `measured` here or `imported` from another leaderboard (`source.url`).
+- `model.params_b` — total parameters (safetensors total), the studio chart's x-axis.
+- `source.kind` — always `measured` on a board route.
 - `source.judge` — LLM judge model when scoring used one.
-- `source.data_license` / `source.attribution` (and the same two at the top level) —
-  imported data's licence and the credit it requires. Arena data is CC BY 4.0: **show the
-  attribution wherever an Arena board is shown.**
-- `cases` counts `benchmark.cases_unit`: evaluated samples, or Arena votes.
+- `cases` counts `benchmark.cases_unit`: evaluated samples.
 - `bounds` — extents of the board under the non-range filters, for sliders; moving a
   range never moves its own ends.
 
@@ -123,7 +118,7 @@ dropped only when that range is set. Ranks are recomputed over the filtered rows
 
 ## `GET /v1/leaderboard?benchmarks=a,b&category=…`
 
-Cross-benchmark overview (Arena's default view). Same filters.
+Cross-benchmark overview. Same filters.
 
 ```json
 {"benchmarks": ["ocrbench", "nepalipixel"],
@@ -133,13 +128,12 @@ Cross-benchmark overview (Arena's default view). Same filters.
 ```
 
 Models with every selected benchmark rank first, then by coverage — a model is never
-ranked above another on less evidence. Only bounded benchmarks take part: an Arena rating
-cannot be averaged with an accuracy.
+ranked above another on less evidence. Only bounded benchmarks take part: a rating cannot
+be averaged with an accuracy.
 
 ## Prices
 
-`meta/models.json` in the store, rewritten by `himeval meta refresh` (and after every
-`himeval import-arena`): per model id, `input_price`/`output_price` ($ per 1M tokens),
+`meta/models.json` in the store, rewritten by `himeval meta refresh`: per model id, `input_price`/`output_price` ($ per 1M tokens),
 `context_length`, and the `source` they came from — an OpenRouter model
 (`openrouter:<id>`, from https://openrouter.ai/api/v1/models) or `catalog`
 (`catalog/model_meta.yaml`). Names are matched only across reasoning-effort suffixes

@@ -2,11 +2,17 @@
 # GET /v1/models exactly, as the studio's MODEL_REGISTRY contract requires.
 # Native OCR models go through Tarka's POST /ocr; multimodal chat models through
 # /chat/completions — the same split the studio's Vision playground makes.
+#
+# `params_b` is the total parameter count of the weights (Hugging Face's safetensors total,
+# embeddings included), the same definition every comparison model uses, so the size axis
+# compares like with like. himalaya-gemma-4 is fine-tuned from Gemma 4 E2B: 5.12B total,
+# which Google calls "2B effective" because its per-layer embeddings can be offloaded.
 
 - id: glm-ocr-nepali
   display_name: glm-ocr-nepali
   org: HimalayaAI
   kind: vlm
+  params_b: 1.33
   endpoint: tarka:/ocr
   adapter: tarka_ocr
   params:
@@ -17,6 +23,9 @@
   display_name: glm-ocr (base control)
   org: Zhipu AI
   kind: vlm
+  open_weights: true
+  params_b: 1.33  # zai-org/GLM-OCR, 1,325,258,240
+  license: MIT
   endpoint: tarka:/ocr
   adapter: tarka_ocr
   params:
@@ -27,6 +36,7 @@
   display_name: himalaya-gemma-4-bf16
   org: HimalayaAI
   kind: vlm
+  params_b: 5.12
   endpoint: tarka:/chat/completions
   adapter: openai_compat
   params:
@@ -39,6 +49,7 @@
   display_name: himalaya-gemma-4-q8
   org: HimalayaAI
   kind: vlm
+  params_b: 5.12
   endpoint: tarka:/chat/completions
   adapter: openai_compat
   params:
@@ -51,6 +62,7 @@
   display_name: himalaya-gemma-4-q4
   org: HimalayaAI
   kind: vlm
+  params_b: 5.12
   endpoint: tarka:/chat/completions
   adapter: openai_compat
   params:
@@ -59,11 +71,13 @@
     api_key_env: [TARKA_API_KEY, HIMEVAL_API_TOKEN]
     concurrency: 8
 
-# The endpoint the earlier himalaya-vlm-eval scripts benchmarked.
+# The endpoint the earlier himalaya-vlm-eval scripts benchmarked: the same Gemma 4 E2B
+# fine-tune as himalaya-gemma-4-bf16, served elsewhere (confirmed 2026-10-13).
 - id: himalaya-bf16-scalabs
   display_name: himalaya-bf16 (Scalabs endpoint)
   org: HimalayaAI
   kind: vlm
+  params_b: 5.12
   endpoint: scalabs:/chat/completions
   adapter: openai_compat
   params:

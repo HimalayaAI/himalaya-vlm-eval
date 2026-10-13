@@ -3,22 +3,19 @@
 # category with several benchmarks shows a switcher between them.
 #
 # These labels are the studio's vocabulary for the Benchmarks page (picked 2026-10-07).
-# Arena's own category names are kept as Arena prints them. Changing a label here changes
-# what the studio shows; adding or removing one is a decision in both repos.
+# Changing a label here changes what the studio shows; adding or removing one is a decision
+# in both repos.
+#
+# Every category is filled by suites this harness runs. The ten that only Arena's imported
+# boards filled (Overall, English, Chinese, Captioning, Creative Writing, Diagram, Entity
+# Recognition, Homework, Humor, and Document's Overall) were removed on 2026-10-13, when the
+# board became results we ran ourselves: a category with nothing in it is a menu entry that
+# points at an empty page. One comes back when a suite we run fills it.
 
 types:
   - id: vision
     label: Vision
     categories:
-      - {id: overall, label: Overall}
-      - {id: english, label: English}
-      - {id: chinese, label: Chinese}
-      - {id: captioning, label: Captioning}
-      - {id: creative-writing, label: Creative Writing}
-      - {id: diagram, label: Diagram}
-      - {id: entity-recognition, label: Entity Recognition}
-      - {id: homework, label: Homework}
-      - {id: humor, label: Humor}
       - {id: ocr, label: OCR}
       - {id: nepali-ocr, label: Nepali OCR}
       - {id: chart, label: Chart}
@@ -29,7 +26,6 @@ types:
   - id: document
     label: Document
     categories:
-      - {id: overall, label: Overall}
       - {id: nepali-fields, label: Nepali Fields}
       - {id: nepali-qa, label: Nepali Q&A}
       - {id: nepali-page, label: Nepali Page}

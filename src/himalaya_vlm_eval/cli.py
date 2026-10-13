@@ -5,7 +5,6 @@
     himeval eval results/runs/<dir>            re-score saved predictions
     himeval publish results/runs/<dir>         push to HIMEVAL_STORE
     himeval import results.json                publish numbers from another leaderboard
-    himeval import-arena                       Arena's Vision/Document boards (HF dataset)
     himeval meta refresh                       prices + context lengths (OpenRouter)
     himeval leaderboard nepalipixel            print a board from the store
     himeval serve                              results API
@@ -310,19 +309,6 @@ def cmd_import(args: argparse.Namespace) -> int:
     return 1 if counts["failed"] else 0
 
 
-def cmd_import_arena(args: argparse.Namespace) -> int:
-    from .arena import import_arena
-
-    store = None if args.dry_run else _store(args.store)
-    arenas = [a.strip() for a in args.arena.split(",")] if args.arena else None
-    counts = import_arena(store, arenas=arenas, revision=args.revision, history=args.history,
-                          dry_run=args.dry_run, force=args.force)
-    print(json.dumps(counts))
-    if store is not None and not args.no_meta:
-        _refresh_meta(store, dry_run=False)
-    return 1 if counts.get("failed") else 0
-
-
 def _refresh_meta(store: Any, *, dry_run: bool) -> dict[str, Any]:
     from . import catalog, meta
     from .store import iter_results
@@ -431,20 +417,6 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-error-rate", type=float, default=0.05)
     s.add_argument("--force", action="store_true", help="overwrite a conflicting result")
     s.set_defaults(func=cmd_publish)
-
-    s = sub.add_parser("import-arena",
-                       help="import Arena leaderboards (official HF dataset, CC BY 4.0)")
-    s.add_argument("--arena", help="comma list of arena ids from catalog/arena.yaml "
-                                   "(default: all)")
-    s.add_argument("--revision", help="dataset commit or branch (default: main, pinned)")
-    s.add_argument("--history", action="store_true",
-                   help="every published snapshot, not just the latest")
-    s.add_argument("--store")
-    s.add_argument("--dry-run", action="store_true")
-    s.add_argument("--force", action="store_true")
-    s.add_argument("--no-meta", action="store_true",
-                   help="skip refreshing prices/context lengths afterwards")
-    s.set_defaults(func=cmd_import_arena)
 
     s = sub.add_parser("meta", help="model metadata: prices and context lengths")
     s.add_argument("action", choices=["refresh"])

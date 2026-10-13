@@ -82,7 +82,7 @@ def _run(bench_id, tmp_path, **settings_over):
     for k, v in settings_over.items():
         setattr(settings, k, v)
     settings.check()
-    return V.run_benchmark(catalog.models()["qwen3-vl-8b-instruct"],
+    return V.run_benchmark(catalog.models()["gemma-3-4b-it"],
                            catalog.resolve_benchmark(bench_id), tmp_path / "work", settings)
 
 
@@ -109,8 +109,8 @@ def test_judge_and_secrets_handling(fake_repo, tmp_path):
     assert inv["env"]["OPENAI_API_KEY"] == "sk-judge"
     assert inv["env"]["OPENAI_API_BASE"] == "https://openrouter.ai/api/v1/chat/completions"
     assert inv["env"]["PRED_FORMAT"] == "tsv" and inv["env"]["MMEVAL_ROOT"] is None
-    model_cfg = inv["config"]["model"]["qwen3-vl-8b-instruct"]
-    assert model_cfg["class"] == "GPT4V" and model_cfg["model"] == "qwen/qwen3-vl-8b-instruct"
+    model_cfg = inv["config"]["model"]["gemma-3-4b-it"]
+    assert model_cfg["class"] == "GPT4V" and model_cfg["model"] == "google/gemma-3-4b-it"
     assert model_cfg["api_base"] == "https://openrouter.ai/api/v1/chat/completions"
     assert inv["config"]["data"]["MathVista_MINI"]["class"] == "Other"
     leftovers = list((tmp_path / "work" / "vlmevalkit").glob(".config-*"))

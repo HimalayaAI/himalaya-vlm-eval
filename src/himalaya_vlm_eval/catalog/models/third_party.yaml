@@ -1,205 +1,91 @@
-# Third-party VLMs through OpenRouter (one key, one API). Ids verified against
-# https://openrouter.ai/api/v1/models on 2026-10-06. Anything not listed here can be run
-# ad hoc as `openrouter:<vendor>/<model>`; add it here once it should carry metadata.
+# The comparison set: open vision-language models in our size class, run by this harness
+# (picked 2026-10-13). The leaderboard ranks only models listed in the catalog
+# (`catalog.board_models()`), so this file *is* who our models are measured against.
 #
-# Reasoning models get temperature: null (several reject it) and a larger token budget.
+# Size class: 1–5B total parameters, the class of himalaya-gemma-4 (Gemma 4 E2B, 5.12B) and
+# glm-ocr-nepali (1.33B). `params_b` is the safetensors total on Hugging Face, embeddings
+# included — the same definition as catalog/models/himalaya.yaml, read on 2026-10-13. A
+# frontier model can still be run ad hoc (`openrouter:<vendor>/<model>`); it is stored, and
+# it is not ranked here.
+#
+# Reached two ways: OpenRouter where it serves the model; otherwise a vLLM server we run
+# (`base_url_env: VLLM_BASE_URL`, one model per server, e.g.
+# `vllm serve google/gemma-4-E2B-it`), since these small models have no public API.
+#
+# Indic models: Bodhan IndicOCR (0.8B, open weights, a layout + OCR pipeline, lists `ne`
+# and `mai`) joins once its in-process adapter exists (#19), run on our own GPU. Sarvam
+# Vision (3B) was considered and left out on 2026-10-13: its weights are closed, and this is
+# a comparison with open models (#18).
 
-# --- OpenAI ------------------------------------------------------------------------------
-- id: gpt-4o
-  display_name: GPT-4o
-  org: OpenAI
-  open_weights: false
-  endpoint: openrouter:openai/gpt-4o
+# --- the untuned base of himalaya-gemma-4 -----------------------------------------------
+# The row that shows what our training added.
+- id: gemma-4-e2b-it
+  display_name: Gemma 4 E2B
+  org: Google
+  open_weights: true
+  params_b: 5.12  # google/gemma-4-E2B-it, 5,123,178,051
+  license: Apache-2.0
+  url: https://huggingface.co/google/gemma-4-E2B-it
+  endpoint: vllm:google/gemma-4-E2B-it
+  adapter: openai_compat
+  params: &vllm
+    model: google/gemma-4-E2B-it
+    base_url_env: VLLM_BASE_URL
+    api_key_env: null
+    concurrency: 16
+
+# --- Alibaba -----------------------------------------------------------------------------
+# Qwen3.5 small models think by default; the benchmarks compare direct answers, so
+# thinking is turned off through the chat template (vLLM's `chat_template_kwargs`).
+- id: qwen3.5-2b
+  display_name: Qwen3.5 2B
+  org: Alibaba
+  open_weights: true
+  params_b: 2.27  # Qwen/Qwen3.5-2B, 2,274,069,824
+  license: Apache-2.0
+  url: https://huggingface.co/Qwen/Qwen3.5-2B
+  endpoint: vllm:Qwen/Qwen3.5-2B
+  adapter: openai_compat
+  params: &qwen
+    <<: *vllm
+    model: Qwen/Qwen3.5-2B
+    extra_body: {chat_template_kwargs: {enable_thinking: false}}
+
+- id: qwen3.5-4b
+  display_name: Qwen3.5 4B
+  org: Alibaba
+  open_weights: true
+  params_b: 4.66  # Qwen/Qwen3.5-4B, 4,659,865,088
+  license: Apache-2.0
+  url: https://huggingface.co/Qwen/Qwen3.5-4B
+  endpoint: vllm:Qwen/Qwen3.5-4B
+  adapter: openai_compat
+  params: {<<: *qwen, model: Qwen/Qwen3.5-4B}
+
+# --- Mistral AI --------------------------------------------------------------------------
+- id: ministral-3-3b
+  display_name: Ministral 3 3B
+  org: Mistral AI
+  open_weights: true
+  params_b: 3.85  # mistralai/Ministral-3-3B-Instruct-2512, 3,849,090,048
+  license: Apache-2.0
+  url: https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512
+  endpoint: openrouter:mistralai/ministral-3b-2512
   adapter: openai_compat
   params: &openrouter
-    model: openai/gpt-4o
+    model: mistralai/ministral-3b-2512
     base_url: https://openrouter.ai/api/v1
     api_key_env: [OPENROUTER_API_KEY]
     concurrency: 8
 
-- id: gpt-4.1
-  display_name: GPT-4.1
-  org: OpenAI
-  open_weights: false
-  endpoint: openrouter:openai/gpt-4.1
-  adapter: openai_compat
-  params: {<<: *openrouter, model: openai/gpt-4.1}
-
-- id: gpt-4.1-mini
-  display_name: GPT-4.1 mini
-  org: OpenAI
-  open_weights: false
-  endpoint: openrouter:openai/gpt-4.1-mini
-  adapter: openai_compat
-  params: {<<: *openrouter, model: openai/gpt-4.1-mini}
-
-- id: gpt-5
-  display_name: GPT-5
-  org: OpenAI
-  open_weights: false
-  endpoint: openrouter:openai/gpt-5
-  adapter: openai_compat
-  params: &reasoning {<<: *openrouter, model: openai/gpt-5, temperature: null, max_tokens: 16384}
-
-- id: gpt-5-mini
-  display_name: GPT-5 mini
-  org: OpenAI
-  open_weights: false
-  endpoint: openrouter:openai/gpt-5-mini
-  adapter: openai_compat
-  params: {<<: *reasoning, model: openai/gpt-5-mini}
-
-- id: gpt-5.5
-  display_name: GPT-5.5
-  org: OpenAI
-  open_weights: false
-  endpoint: openrouter:openai/gpt-5.5
-  adapter: openai_compat
-  params: {<<: *reasoning, model: openai/gpt-5.5}
-
-# --- Google ------------------------------------------------------------------------------
-- id: gemini-2.5-flash
-  display_name: Gemini 2.5 Flash
-  org: Google
-  open_weights: false
-  endpoint: openrouter:google/gemini-2.5-flash
-  adapter: openai_compat
-  params: {<<: *openrouter, model: google/gemini-2.5-flash, max_tokens: 16384}
-
-- id: gemini-2.5-pro
-  display_name: Gemini 2.5 Pro
-  org: Google
-  open_weights: false
-  endpoint: openrouter:google/gemini-2.5-pro
-  adapter: openai_compat
-  params: {<<: *reasoning, model: google/gemini-2.5-pro}
-
-- id: gemini-3.1-pro-preview
-  display_name: Gemini 3.1 Pro (preview)
-  org: Google
-  open_weights: false
-  endpoint: openrouter:google/gemini-3.1-pro-preview
-  adapter: openai_compat
-  params: {<<: *reasoning, model: google/gemini-3.1-pro-preview}
-
-- id: gemini-3.5-flash
-  display_name: Gemini 3.5 Flash
-  org: Google
-  open_weights: false
-  endpoint: openrouter:google/gemini-3.5-flash
-  adapter: openai_compat
-  params: {<<: *reasoning, model: google/gemini-3.5-flash}
-
-- id: gemma-3-27b-it
-  display_name: Gemma 3 27B
+# --- Google (previous generation) --------------------------------------------------------
+- id: gemma-3-4b-it
+  display_name: Gemma 3 4B
   org: Google
   open_weights: true
-  params_b: 27
+  params_b: 4.3  # google/gemma-3-4b-it, 4,300,079,472
   license: Gemma
-  endpoint: openrouter:google/gemma-3-27b-it
+  url: https://huggingface.co/google/gemma-3-4b-it
+  endpoint: openrouter:google/gemma-3-4b-it
   adapter: openai_compat
-  params: {<<: *openrouter, model: google/gemma-3-27b-it}
-
-# --- Anthropic ---------------------------------------------------------------------------
-- id: claude-haiku-4.5
-  display_name: Claude Haiku 4.5
-  org: Anthropic
-  open_weights: false
-  endpoint: openrouter:anthropic/claude-haiku-4.5
-  adapter: openai_compat
-  params: {<<: *openrouter, model: anthropic/claude-haiku-4.5}
-
-- id: claude-sonnet-4.5
-  display_name: Claude Sonnet 4.5
-  org: Anthropic
-  open_weights: false
-  endpoint: openrouter:anthropic/claude-sonnet-4.5
-  adapter: openai_compat
-  params: {<<: *openrouter, model: anthropic/claude-sonnet-4.5}
-
-- id: claude-opus-4.5
-  display_name: Claude Opus 4.5
-  org: Anthropic
-  open_weights: false
-  endpoint: openrouter:anthropic/claude-opus-4.5
-  adapter: openai_compat
-  params: {<<: *openrouter, model: anthropic/claude-opus-4.5}
-
-- id: claude-sonnet-5.5
-  display_name: Claude Sonnet 5.5
-  org: Anthropic
-  open_weights: false
-  endpoint: openrouter:anthropic/claude-sonnet-5.5
-  adapter: openai_compat
-  params: {<<: *openrouter, model: anthropic/claude-sonnet-5.5}
-
-# --- Open-weight VLMs ----------------------------------------------------------------------
-- id: qwen2.5-vl-72b-instruct
-  display_name: Qwen2.5-VL 72B
-  org: Alibaba
-  open_weights: true
-  params_b: 72
-  license: Qwen
-  endpoint: openrouter:qwen/qwen2.5-vl-72b-instruct
-  adapter: openai_compat
-  params: {<<: *openrouter, model: qwen/qwen2.5-vl-72b-instruct}
-
-- id: qwen3-vl-8b-instruct
-  display_name: Qwen3-VL 8B
-  org: Alibaba
-  open_weights: true
-  params_b: 8
-  license: Apache-2.0
-  endpoint: openrouter:qwen/qwen3-vl-8b-instruct
-  adapter: openai_compat
-  params: {<<: *openrouter, model: qwen/qwen3-vl-8b-instruct}
-
-- id: qwen3-vl-30b-a3b-instruct
-  display_name: Qwen3-VL 30B-A3B
-  org: Alibaba
-  open_weights: true
-  params_b: 30
-  license: Apache-2.0
-  endpoint: openrouter:qwen/qwen3-vl-30b-a3b-instruct
-  adapter: openai_compat
-  params: {<<: *openrouter, model: qwen/qwen3-vl-30b-a3b-instruct}
-
-- id: qwen3-vl-235b-a22b-instruct
-  display_name: Qwen3-VL 235B-A22B
-  org: Alibaba
-  open_weights: true
-  params_b: 235
-  license: Apache-2.0
-  endpoint: openrouter:qwen/qwen3-vl-235b-a22b-instruct
-  adapter: openai_compat
-  params: {<<: *openrouter, model: qwen/qwen3-vl-235b-a22b-instruct}
-
-- id: mistral-small-3.2-24b-instruct
-  display_name: Mistral Small 3.2 24B
-  org: Mistral AI
-  open_weights: true
-  params_b: 24
-  license: Apache-2.0
-  endpoint: openrouter:mistralai/mistral-small-3.2-24b-instruct
-  adapter: openai_compat
-  params: {<<: *openrouter, model: mistralai/mistral-small-3.2-24b-instruct}
-
-- id: llama-4-maverick
-  display_name: Llama 4 Maverick
-  org: Meta
-  open_weights: true
-  params_b: 400
-  license: Llama 4 Community
-  endpoint: openrouter:meta-llama/llama-4-maverick
-  adapter: openai_compat
-  params: {<<: *openrouter, model: meta-llama/llama-4-maverick}
-
-- id: glm-4.5v
-  display_name: GLM-4.5V
-  org: Zhipu AI
-  open_weights: true
-  params_b: 106
-  license: MIT
-  endpoint: openrouter:z-ai/glm-4.5v
-  adapter: openai_compat
-  params: {<<: *openrouter, model: z-ai/glm-4.5v}
+  params: {<<: *openrouter, model: google/gemma-3-4b-it}
