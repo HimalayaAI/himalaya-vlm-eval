@@ -18,6 +18,7 @@ from html.parser import HTMLParser
 from typing import Any
 
 from . import text as T
+from . import vlm_bench as V
 from .metrics import acer, anls, edit_distance
 
 Score = dict[str, float | None]
@@ -647,6 +648,10 @@ SCORERS: dict[str, Scorer] = {
     "reading_order": score_reading_order,
     "table": score_table,
     "layout": score_layout,
+    # NepalPixel VLM Bench, scored as its own score_vlm_bench.py does (vlm_bench.py).
+    "vlm_kie": V.score_kie,
+    "vlm_ocr": V.score_ocr,
+    "vlm_abstain": V.score_abstain,
 }
 
 METRICS: dict[str, list[str]] = {
@@ -659,7 +664,22 @@ METRICS: dict[str, list[str]] = {
     "table": ["teds", "teds_digitfold", "teds_struct", "table_parse_ok"],
     "layout": ["layout_f1", "layout_precision", "layout_recall", "detection_f1",
                "layout_parse_ok"],
+    "vlm_kie": ["anls", "exact_match"],
+    "vlm_ocr": ["cer"],
+    "vlm_abstain": ["abstention", "leak"],
 }
+
+# Metrics that are a ratio of sums over samples, not a mean of per-sample values:
+# metric → (numerator key, denominator key) in each sample's scores. The two keys are
+# components, not metrics of their own. vlm_ocr's CER is micro-averaged over pages, as the
+# dataset's scorer defines it: Σ edits ÷ Σ reference characters.
+RATIOS: dict[str, dict[str, tuple[str, str]]] = {
+    "vlm_ocr": {"cer": ("edits", "chars")},
+}
+
+# Scorers whose failed predictions are scored as an empty reply rather than a fixed worst
+# case, because that is what the benchmark's own scorer does with a missing id.
+EMPTY_ON_ERROR = frozenset({"vlm_kie", "vlm_ocr", "vlm_abstain"})
 
 # Worst-case values for an errored sample, per scorer.
 WORST: dict[str, Score] = {

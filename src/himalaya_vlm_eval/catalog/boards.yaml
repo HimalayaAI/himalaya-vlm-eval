@@ -16,8 +16,9 @@ types:
   - id: vision
     label: Vision
     categories:
-      - {id: ocr, label: OCR}
+      # Nepali first (picked 2026-10-13): the board exists to measure Nepali reading.
       - {id: nepali-ocr, label: Nepali OCR}
+      - {id: ocr, label: OCR}
       - {id: chart, label: Chart}
       - {id: math, label: Math}
       - {id: chat, label: Chat}

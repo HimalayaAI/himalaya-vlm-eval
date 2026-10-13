@@ -128,22 +128,20 @@ class OpenAICompatModel(Model):
             self._client = None
 
     def _body(self, image: Any, prompt: Prompt) -> dict[str, Any]:
-        mime, b64 = encode_image(image, self.image_format, self.max_image_side)
-        image_url: dict[str, Any] = {"url": f"data:{mime};base64,{b64}"}
-        if self.image_detail:
-            image_url["detail"] = self.image_detail
+        # A list is a multi-page sample (a question about sheets 1 and 2 of a document):
+        # every page goes in, in order, before the question.
+        parts: list[dict[str, Any]] = []
+        for img in image if isinstance(image, (list, tuple)) else [image]:
+            mime, b64 = encode_image(img, self.image_format, self.max_image_side)
+            image_url: dict[str, Any] = {"url": f"data:{mime};base64,{b64}"}
+            if self.image_detail:
+                image_url["detail"] = self.image_detail
+            parts.append({"type": "image_url", "image_url": image_url})
         messages: list[dict[str, Any]] = []
         if prompt.system:
             messages.append({"role": "system", "content": prompt.system})
-        messages.append(
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": image_url},
-                    {"type": "text", "text": prompt.text},
-                ],
-            }
-        )
+        parts.append({"type": "text", "text": prompt.text})
+        messages.append({"role": "user", "content": parts})
         body: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -255,6 +253,10 @@ class TarkaOCRModel(OpenAICompatModel):
         return {**super().describe(), "adapter": "tarka_ocr"}
 
     def _body(self, image: Any, prompt: Prompt) -> dict[str, Any]:
+        if isinstance(image, (list, tuple)):
+            # /ocr takes one image. A question spanning two sheets is a per-sample error,
+            # recorded, rather than an answer read off the first sheet alone.
+            raise ModelError(f"/ocr takes one image; this sample has {len(image)} pages")
         mime, b64 = encode_image(image, self.image_format, self.max_image_side)
         body: dict[str, Any] = {
             "model": self.model,

@@ -166,9 +166,18 @@ def test_iou():
 
 
 def test_every_scorer_declares_metrics_and_worst_case():
-    assert set(S.SCORERS) == set(S.METRICS) == set(S.WORST)
+    """Every scorer says what a failed sample scores: a fixed worst case, or (for a
+    benchmark whose own scorer treats a missing prediction as an empty one) the empty
+    reply scored normally. Ratio metrics are built from components a scorer returns."""
+    assert set(S.SCORERS) == set(S.METRICS)
+    assert set(S.SCORERS) == set(S.WORST) | S.EMPTY_ON_ERROR
+    assert not set(S.WORST) & S.EMPTY_ON_ERROR
     for name, worst in S.WORST.items():
         assert set(worst) <= set(S.METRICS[name])
+    for name, ratios in S.RATIOS.items():
+        assert set(ratios) <= set(S.METRICS[name])
+        out = S.SCORERS[name]("", ["x"], None)
+        assert all(num in out and den in out for num, den in ratios.values())
 
 
 # --- regressions found in review (7 Oct 2026) ---------------------------------------------

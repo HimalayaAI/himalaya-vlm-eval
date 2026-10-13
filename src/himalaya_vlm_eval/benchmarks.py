@@ -72,7 +72,8 @@ class NativeBenchmark:
         if self.info.primary_metric not in self.metric_names:
             raise ValueError(f"{self.info.id}: primary metric not in metrics")
         if (self.task == "vqa" and not self.dataset.get("question")
-                and self.dataset.get("source") != "nepalipixel_docs"):
+                and self.dataset.get("source") not in ("nepalipixel_docs",
+                                                       "nepalpixel_vlm_bench")):
             raise ValueError(f"{self.info.id}: vqa benchmarks need dataset.question")
 
     # --- identity --------------------------------------------------------------------
@@ -106,6 +107,12 @@ class NativeBenchmark:
             total = len(samples)
             keep = self._subset(total, limit, seed)
             samples = [samples[i] for i in keep]
+            _check_unique(samples, self.info.id)
+            return LoadedSet(samples, total, provenance)
+        if source == "nepalpixel_vlm_bench":
+            from .vlm_bench import load as load_vlm_bench
+
+            samples, total, provenance = load_vlm_bench(self.dataset, limit, seed)
             _check_unique(samples, self.info.id)
             return LoadedSet(samples, total, provenance)
         raise ValueError(f"{self.info.id}: unknown dataset source {source!r}")
@@ -208,9 +215,15 @@ class NativeBenchmark:
             text = text.replace("{question}", sample.question)
         return Prompt(text=text, system=self.system)
 
+    @property
+    def ratios(self) -> dict[str, tuple[str, str]]:
+        return dict(S.RATIOS.get(self.scorer or "", {}))
+
     def score(self, output: str | None, references: list[str],
               target: Any = None) -> dict[str, float | None]:
         if self.scorer:
+            if output is None and self.scorer in S.EMPTY_ON_ERROR:
+                output = ""
             if output is None:
                 return dict(S.WORST[self.scorer])
             return S.SCORERS[self.scorer](output, references, target)

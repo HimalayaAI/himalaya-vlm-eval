@@ -458,9 +458,29 @@ def _evaluate(run_dir: Path, bench_entry: BenchmarkEntry | None,
         for row in per_sample:
             fh.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
 
-    metric_names = list(dict.fromkeys(k for row in per_sample for k in row["scores"]))
+    ratios = bench.ratios
+    components = {k for pair in ratios.values() for k in pair}
+    metric_names = [k for k in dict.fromkeys(k for row in per_sample for k in row["scores"])
+                    if k not in components]
     primary = bench.info.primary_metric
     metric_values: dict[str, MetricValue] = {}
+    for name, (num, den) in ratios.items():
+        # A micro-average: Σ num ÷ Σ den over samples (e.g. CER over every character of
+        # every page), with the same document-level cluster bootstrap as a mean.
+        rows = [row for row in per_sample
+                if row["scores"].get(num) is not None and row["scores"].get(den) is not None]
+        if not rows:
+            continue
+        nums = [row["scores"][num] for row in rows]
+        dens = [row["scores"][den] for row in rows]
+        value = sum(nums) / max(sum(dens), 1.0)
+        if name == primary:
+            docs = [row["meta"].get("doc_id") for row in rows]
+            groups = docs if all(d is not None for d in docs) else None
+            lo, hi = M.bootstrap_ratio_ci(nums, dens, n_resamples=n_resamples, groups=groups)
+            metric_values[name] = MetricValue(value=value, ci_low=lo, ci_high=hi)
+        else:
+            metric_values[name] = MetricValue(value=value)
     for name in metric_names:
         # None = not applicable to that sample (e.g. answer accuracy on an unanswerable
         # question); it is left out of the mean rather than counted as zero.
@@ -491,7 +511,7 @@ def _evaluate(run_dir: Path, bench_entry: BenchmarkEntry | None,
         cases=len(per_sample),
         errors=errors,
         metrics=metric_values,
-        breakdowns=_breakdowns(per_sample, bench.breakdowns),
+        breakdowns=_breakdowns(per_sample, bench.breakdowns, ratios),
         config={**meta["config"], "config_hash": meta["config_hash"]},
         stats=_stats(records, meta),
         has_samples=True,
@@ -514,8 +534,11 @@ def _group_values(value: Any) -> list[str]:
     return ["unknown" if value is None or value == "" else str(value)]
 
 
-def _breakdowns(rows: list[dict[str, Any]], keys: list[str]
+def _breakdowns(rows: list[dict[str, Any]], keys: list[str],
+                ratios: dict[str, tuple[str, str]] | None = None,
                 ) -> dict[str, dict[str, dict[str, float]]]:
+    ratios = ratios or {}
+    components = {k for pair in ratios.values() for k in pair}
     out: dict[str, dict[str, dict[str, float]]] = {}
     for key in keys:
         groups: dict[str, list[dict[str, float]]] = collections.defaultdict(list)
@@ -525,7 +548,14 @@ def _breakdowns(rows: list[dict[str, Any]], keys: list[str]
         table: dict[str, dict[str, float]] = {}
         for g, scores in sorted(groups.items()):
             cell: dict[str, float] = {"n": float(len(scores))}
+            for m, (num, den) in ratios.items():
+                pairs = [(x[num], x[den]) for x in scores
+                         if x.get(num) is not None and x.get(den) is not None]
+                if pairs:
+                    cell[m] = sum(a for a, _ in pairs) / max(sum(b for _, b in pairs), 1.0)
             for m in dict.fromkeys(k for x in scores for k in x):
+                if m in components:
+                    continue
                 vals = [x[m] for x in scores if x.get(m) is not None]
                 if vals:
                     cell[m] = statistics.fmean(vals)

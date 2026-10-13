@@ -231,6 +231,36 @@ def get_metric(name: str) -> Metric:
         raise KeyError(f"unknown metric {name!r}; known: {sorted(METRICS)}") from None
 
 
+def bootstrap_ratio_ci(
+    nums: Sequence[float], dens: Sequence[float], *, n_resamples: int = 1000,
+    alpha: float = 0.05, seed: int = 0, groups: Sequence[Any] | None = None,
+) -> tuple[float, float]:
+    """Percentile bootstrap CI of Σ nums ÷ Σ dens (a micro-average), resampling whole
+    groups when given, as `bootstrap_ci` does for a mean."""
+    n = len(nums)
+    if n == 0 or len(dens) != n:
+        raise ValueError("nums and dens must be non-empty and equal in length")
+    keys = list(groups) if groups is not None else list(range(n))
+    clusters: dict[Any, list[float]] = {}
+    for g, a, b in zip(keys, nums, dens, strict=True):
+        c = clusters.setdefault(g, [0.0, 0.0])
+        c[0] += a
+        c[1] += b
+    sums = list(clusters.values())
+
+    def ratio(picked: Sequence[list[float]]) -> float:
+        return sum(a for a, _ in picked) / max(sum(b for _, b in picked), 1.0)
+
+    if len(sums) == 1:
+        r = ratio(sums)
+        return r, r
+    rng = random.Random(seed)
+    draws = sorted(ratio(rng.choices(sums, k=len(sums))) for _ in range(n_resamples))
+    lo = draws[int((alpha / 2) * n_resamples)]
+    hi = draws[min(n_resamples - 1, int((1 - alpha / 2) * n_resamples))]
+    return lo, hi
+
+
 def bootstrap_ci(
     values: Sequence[float], *, n_resamples: int = 1000, alpha: float = 0.05, seed: int = 0,
     groups: Sequence[Any] | None = None,

@@ -114,7 +114,7 @@ same command continues where it stopped**:
 | Category | Native (himeval) | VLMEvalKit |
 |---|---|---|
 | OCR | `nepalipixel`, `nepalipixel-docs-page` | OCRBench, OCRBench v2 (EN/ZH), CC-OCR, olmOCR-Bench, TextVQA |
-| Document | `nepalipixel-docs-kv`, `-qa`, `-layout` | DocVQA, InfographicVQA, OmniDocBench |
+| Document | `nepalipixel-docs-kv`, `-qa`, `-layout`; `nepalpixel-vlm-kie`, `-ocr`, `-abstain` | DocVQA, InfographicVQA, OmniDocBench |
 | Chart / figure | `nepalipixel-docs-table` | ChartQA, AI2D, CharXiv (reasoning, descriptive), SEED-Bench-2-Plus |
 | Math | | MathVista, MathVerse, MATH-Vision (+mini), LogicVista, We-Math, DynaMath |
 | Chat | | MM-Vet, LLaVA-Bench |
@@ -146,6 +146,20 @@ QA with "ANSWER NOT PRESENT" negatives, page transcription with reading order (K
 tables (TEDS on the generator's cell grid) and layout (role F1 at IoU 0.5). See
 [docs/SCORING.md](docs/SCORING.md).
 
+**NepalPixel VLM Bench** ([`himalaya-ai/nepalpixel-vlm-bench`](https://huggingface.co/datasets/himalaya-ai/nepalpixel-vlm-bench),
+gated, CC BY-NC 4.0) is three benchmarks over 2,130 synthetic Nepali government documents,
+scored exactly as the dataset's own `score_vlm_bench.py` does (NFC + whitespace, no digit
+folding; `src/himalaya_vlm_eval/vlm_bench.py`):
+
+| Benchmark | Board | Headline | Also recorded |
+|---|---|---|---|
+| `nepalpixel-vlm-kie` | Document › Nepali Q&A | ANLS (τ = 0.5) per question | exact match |
+| `nepalpixel-vlm-ocr` | Document › Nepali Page | CER, micro-averaged over pages (Σ edits ÷ Σ chars) | — |
+| `nepalpixel-vlm-abstain` | Document › Nepali Q&A | abstention rate | leak rate |
+
+`--limit N` draws N rows of a config: N *documents* for `kie`, about 15 questions each. A
+question on a later sheet of a multi-page document is asked with that sheet (or sheets).
+
 **VLMEvalKit benchmarks** run through a VLMEvalKit checkout so scores match the
 OpenCompass leaderboard's method. Setup and the judge model: [docs/VLMEVALKIT.md](docs/VLMEVALKIT.md).
 
@@ -165,7 +179,7 @@ the same size class they are measured against (`catalog/models/third_party.yaml`
 
 `catalog/boards.yaml` lays the boards out the way the studio shows them: two top-bar types,
 **Vision** and **Document**, each with a side list of categories, every one filled by suites
-run here (Vision: OCR · Nepali OCR · Chart · Math · Chat · General · Hallucination; Document:
+run here (Vision: Nepali OCR · OCR · Chart · Math · Chat · General · Hallucination; Document:
 Nepali Fields · Nepali Q&A · Nepali Page · Nepali Table · Nepali Layout · Document Q&A ·
 Parsing). A benchmark goes on its category's default
 board unless its YAML says `board:`. Served by `GET /v1/boards`.
