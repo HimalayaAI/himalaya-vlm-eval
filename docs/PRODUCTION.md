@@ -7,7 +7,11 @@ things ship, each on its own path:
 |---|---|---|
 | **Code** (this repo) | GitHub | branch → PR → CI green → merge to `main` |
 | **Results API** (`himalaya-vlm-eval-api` image) | the studio host, compose profile `benchmarks` | built and pushed to GHCR by CI on every merge to `main` |
-| **Results** (`runs/<id>/result.json`, `meta/models.json`) | the S3 store | published by `himeval run` / `himeval import-arena` / `himeval meta refresh`, from a runner or the weekly workflow |
+| **Results** (`runs/<id>/result.json`, `meta/models.json`) | the S3 store | published by `himeval run` and `himeval meta refresh`, from a runner |
+
+The board shows only what a runner measured, for the models in the catalog (picked
+2026-10-13; README § What the board shows). There is no import step and no scheduled
+workflow: a result exists because we ran it.
 
 Nothing is ever built or published by hand on the studio host.
 
@@ -26,7 +30,7 @@ Do these once, in order. Tick each before moving on.
       enforce it.
 - [ ] **Reader IAM user** (the API on the studio host): `s3:GetObject` + `s3:ListBucket` on
       that bucket only.
-- [ ] **Writer IAM user** (runners and the Arena workflow): `s3:GetObject` + `s3:PutObject`
+- [ ] **Writer IAM user** (runners): `s3:GetObject` + `s3:PutObject`
       + `s3:ListBucket` on that bucket only. Publishing reads before it writes (it refuses to
       overwrite a result with different content), hence `GetObject`.
 - [ ] No `s3:DeleteObject` for either. Removing a result is an operator action.
@@ -50,33 +54,37 @@ An S3-compatible provider (Tarka Object Storage, MinIO, R2) works too: set
       (packages are private; the host already pulls the studio's private images the same way).
 - [ ] Delete the stale `nepeval-api` package (pre-rename; nothing pulls it).
 
-### 1.3 Repository secrets (Arena sync)
+### 1.3 Run the comparison matrix
 
-Settings → Secrets and variables → Actions, on this repo:
-
-- [ ] `HIMEVAL_STORE` = `s3://himalaya-vlm-eval-results`
-- [ ] `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` = the **writer** user
-- [ ] `AWS_DEFAULT_REGION` (optional, defaults to `ap-south-1`)
-
-Without `HIMEVAL_STORE` the `Arena sync` workflow skips instead of failing.
-
-### 1.4 Seed the store
-
-From any machine with the writer credentials:
+From a runner with the writer credentials and the model keys. The hosted models go first;
+the self-hosted ones need a GPU (each fits on one 24 GB card) and one vLLM server at a time.
 
 ```bash
 uv sync --extra run --extra s3
 export HIMEVAL_STORE=s3://himalaya-vlm-eval-results AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=… AWS_DEFAULT_REGION=ap-south-1
-uv run himeval import-arena          # Arena Vision + Document, latest snapshot; then prices
-uv run himeval meta refresh --show-missing   # optional: see which models have no price
+export TARKA_API_KEY=… OPENROUTER_API_KEY=…
+
+# ours, the glm-ocr control, and the comparison models OpenRouter serves
+uv run himeval run --bench all --model \
+  glm-ocr-nepali,glm-ocr,himalaya-gemma-4-bf16,himalaya-gemma-4-q8,himalaya-gemma-4-q4,ministral-3-3b,gemma-3-4b-it
+
+# the comparison models we serve ourselves
+for pair in google/gemma-4-E2B-it=gemma-4-e2b-it Qwen/Qwen3.5-2B=qwen3.5-2b Qwen/Qwen3.5-4B=qwen3.5-4b; do
+  vllm serve "${pair%%=*}" --port 8001 & pid=$!
+  until curl -sf localhost:8001/v1/models >/dev/null; do sleep 5; done
+  VLLM_BASE_URL=http://localhost:8001/v1 uv run himeval run --bench all --model "${pair##*=}"
+  kill $pid; wait $pid
+done
+uv run himeval meta refresh          # prices for the models that have one
 ```
 
-Or run the **Arena sync** workflow once by hand (Actions → Arena sync → Run workflow).
+`--bench all` includes the VLMEvalKit suites, which need a VLMEvalKit checkout and a judge
+(`docs/VLMEVALKIT.md`). `--limit N` takes a seeded subset for a first pass; the board marks
+those rows partial.
 
-- [ ] `import-arena` prints `{"revision": "…", "published": 2178, …}` (count varies by snapshot)
-      with no `failed`.
+- [ ] Every catalog model has a result on `nepalipixel` (`himeval leaderboard nepalipixel`).
 
-### 1.5 Studio host
+### 1.4 Studio host
 
 The studio side is documented in the studio repo, `docs/deployment/studio.md` § Benchmarks.
 In short, in the host's `/opt/himalaya-studio/.env`:
@@ -169,20 +177,12 @@ Or without Docker: `uv sync --extra run --extra s3 [--extra easyocr …]` and th
 Publish a run made earlier (or elsewhere) without re-running it:
 `himeval publish results/runs/<run-dir> --store s3://himalaya-vlm-eval-results`.
 
-### 3.2 Arena
+### 3.2 Numbers from another leaderboard
 
-Weekly, automatically (`Arena sync`, Mondays 03:17 UTC), once §1.3 is done. By hand:
-`himeval import-arena` (latest snapshot) or `--history` (every snapshot). Re-importing a
-snapshot is a no-op.
+`himeval import file.json` stores them for reference (`--format-help`, `--dry-run` first).
+They are never ranked: board routes serve measured runs only.
 
-- [ ] Arena data comes **only** from the HF dataset (CC BY 4.0). Never point a tool at
-      arena.ai: its Terms of Use forbid scraping and automated access.
-
-### 3.3 Numbers from another leaderboard
-
-`himeval import file.json` (`--format-help` for the shape; `--dry-run` first).
-
-### 3.4 Prices
+### 3.3 Prices
 
 `himeval meta refresh` rewrites `meta/models.json` from OpenRouter plus
 `catalog/model_meta.yaml`. A model with the wrong or a missing price is fixed in that YAML
@@ -196,11 +196,10 @@ wrong price is worse than N/A.
 - [ ] `curl https://<studio>/api/health` → `"benchmarks":"configured"`.
 - [ ] On the host: `docker compose ps himalaya-vlm-eval-api` → `healthy`; its `/health`
       shows `"ok": true`, `"runs"` > 0, `"invalid": 0`, `"meta_models"` > 0.
-- [ ] Studio → Models → Benchmarks: Vision → Overall shows Arena's board with prices, the
-      credit line under it, and today's snapshot date; Vision → OCR's spread column matches
-      arena.ai's for the top rows.
-- [ ] Vision → Nepali OCR shows the measured NepaliPixel results.
-- [ ] Style control On/Off, Licence, and one price slider each change the board.
+- [ ] Studio → Models → Benchmarks opens on Vision → OCR; Vision → Nepali OCR shows the
+      measured NepaliPixel results for every catalog model, each with its size on the chart.
+- [ ] No row is imported, and no model outside the catalog appears.
+- [ ] Licence and one slider each change the board.
 - [ ] Both themes, and a phone-width check.
 
 ## 5. Operating notes
@@ -217,5 +216,5 @@ wrong price is worse than N/A.
   for runners, a fallback Tarka key when `TARKA_API_KEY` is unset (a holdover from before
   the rename). Never set it on a runner. If a runner ever sends it to Tarka, rotate it.
 - **Who holds which credential:** the studio host holds only the reader key and
-  `HIMEVAL_API_TOKEN`. Runners and the Arena workflow hold the writer key and model keys
+  `HIMEVAL_API_TOKEN`. Runners hold the writer key and model keys
   (`TARKA_API_KEY`, `OPENROUTER_API_KEY`, judge key). None of them is baked into an image.

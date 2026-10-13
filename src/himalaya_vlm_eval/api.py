@@ -195,6 +195,18 @@ def create_app(store: Store | None = None, refresh_seconds: float | None = None,
             meta=index().meta,
         )
 
+    def ranked() -> list[RunResult]:
+        """What the leaderboard may show: runs we measured, of models in the catalog.
+
+        Picked 2026-10-13 — every number on the board comes from a run this harness did,
+        on the comparison set the catalog defines. An imported result (another
+        leaderboard's numbers) or an ad-hoc model stays in the store and in `/v1/runs`,
+        and never reaches a board, an overview or the model list.
+        """
+        roster = catalog.board_models()
+        return [r for r in index().results
+                if r.source.kind == "measured" and r.model.id in roster]
+
     def with_meta(model: dict[str, Any]) -> dict[str, Any]:
         info = index().meta.get(model["id"], {})
         priced = blended_price(info) is not None
@@ -229,7 +241,7 @@ def create_app(store: Store | None = None, refresh_seconds: float | None = None,
     @app.get("/v1/benchmarks", dependencies=v1)
     def list_benchmarks(request: Request, response: Response,
                         category: str | None = None) -> Any:
-        reps = representatives(index().results)
+        reps = representatives(ranked())
         counts: dict[str, int] = {}
         latest: dict[str, RunResult] = {}
         for (b, _), r in reps.items():
@@ -252,7 +264,7 @@ def create_app(store: Store | None = None, refresh_seconds: float | None = None,
     @app.get("/v1/models", dependencies=v1)
     def list_models(request: Request, response: Response) -> Any:
         seen: dict[str, dict] = {}
-        for (b, mid), r in representatives(index().results).items():
+        for (b, mid), r in representatives(ranked()).items():
             row = seen.setdefault(mid, {**r.model.model_dump(mode="json"), "benchmarks": []})
             row["benchmarks"].append(b)
         data = sorted((with_meta(m) for m in seen.values()), key=lambda m: m["id"])
@@ -265,16 +277,16 @@ def create_app(store: Store | None = None, refresh_seconds: float | None = None,
         request: Request, response: Response,
         benchmarks: str | None = None, category: str | None = None,
         kind: str | None = None, open_weights: bool | None = None, org: str | None = None,
-        include_imported: bool = True, include_subsets: bool = True,
+        include_subsets: bool = True,
     ) -> Any:
         ids = [b.strip() for b in benchmarks.split(",")] if benchmarks else None
-        results = index().results
+        results = ranked()
         if category:
             in_cat = {r.benchmark.id for r in results if r.benchmark.category == category}
             ids = [b for b in (ids or sorted(in_cat)) if b in in_cat]
             if not ids:
                 return cached(request, response, {"benchmarks": [], "data": []})
-        f = filters(kind, open_weights, org, include_imported, include_subsets)
+        f = filters(kind, open_weights, org, False, include_subsets)
         defs = {k: e.info for k, e in catalog.benchmarks().items()}
         selected, rows = overview(results, ids, f, defs)
         return cached(request, response,
@@ -283,9 +295,9 @@ def create_app(store: Store | None = None, refresh_seconds: float | None = None,
     @app.get("/v1/boards", dependencies=v1)
     def boards(request: Request, response: Response) -> Any:
         """The leaderboard layout: top-bar types → side-list categories → the boards in
-        each (a category with several shows a switcher; Arena boards pair by style
-        control). Every board the catalog defines is listed, with or without results."""
-        reps = representatives(index().results)
+        each (a category with several shows a switcher). Every board the catalog defines
+        is listed, with or without results."""
+        reps = representatives(ranked())
         counts: dict[str, int] = {}
         latest: dict[str, str] = {}
         for (b, _), r in reps.items():
@@ -293,8 +305,7 @@ def create_app(store: Store | None = None, refresh_seconds: float | None = None,
             when = r.created_at.isoformat()
             latest[b] = max(latest.get(b, when), when)
         by_board: dict[str, list[dict]] = {}
-        entries = sorted(catalog.benchmarks().values(), key=lambda e: e.engine != "arena")
-        for e in entries:
+        for e in catalog.benchmarks().values():
             i = e.info
             by_board.setdefault(i.board or "", []).append({
                 "benchmark": i.id, "display_name": i.display_name, "engine": e.engine,
@@ -315,7 +326,7 @@ def create_app(store: Store | None = None, refresh_seconds: float | None = None,
     def leaderboard(
         benchmark_id: str, request: Request, response: Response,
         kind: str | None = None, open_weights: bool | None = None, org: str | None = None,
-        include_imported: bool = True, include_subsets: bool = True,
+        include_subsets: bool = True,
         score_min: float | None = None, score_max: float | None = None,
         input_price_min: float | None = None, input_price_max: float | None = None,
         output_price_min: float | None = None, output_price_max: float | None = None,
@@ -327,10 +338,10 @@ def create_app(store: Store | None = None, refresh_seconds: float | None = None,
             "output_price": (output_price_min, output_price_max),
             "context_length": (context_min, context_max),
         }
-        f = filters(kind, open_weights, org, include_imported, include_subsets, None, ranges)
+        f = filters(kind, open_weights, org, False, include_subsets, None, ranges)
         entry = catalog.benchmarks().get(benchmark_id)
         definition = entry.info if entry else None
-        results = index().results
+        results = ranked()
         rows = benchmark_board(results, benchmark_id, f, definition)
         if rows:
             info = rows[0].result.benchmark.model_dump(mode="json")
@@ -341,7 +352,7 @@ def create_app(store: Store | None = None, refresh_seconds: float | None = None,
         # Slider extents: the whole board under the non-range filters, so moving a slider
         # never moves its own ends.
         whole = benchmark_board(results, benchmark_id, filters(
-            kind, open_weights, org, include_imported, include_subsets), definition)
+            kind, open_weights, org, False, include_subsets), definition)
         source = rows[0].result.source if rows else (whole[0].result.source if whole else None)
         body = {
             "benchmark": info,

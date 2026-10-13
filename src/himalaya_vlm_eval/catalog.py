@@ -24,8 +24,7 @@ from .schema import BenchmarkInfo, ModelInfo
 
 BUILTIN_DIR = Path(__file__).parent / "catalog"
 
-# `arena` boards are imported (`himeval import-arena`), never run.
-Engine = Literal["native", "vlmevalkit", "arena"]
+Engine = Literal["native", "vlmevalkit"]
 RUNNABLE_ENGINES = ("native", "vlmevalkit")
 
 
@@ -39,6 +38,11 @@ class ModelEntry:
         from .registry import get_adapter
 
         params = {**self.params, **(overrides or {})}
+        # A self-hosted endpoint is named by the environment, not the catalog: the same
+        # entry runs against whichever vLLM server the runner started for it.
+        env = params.pop("base_url_env", None)
+        if env:
+            params["base_url"] = os.environ.get(env, "http://localhost:8000/v1")
         try:
             return get_adapter(self.adapter)(**params)
         except TypeError as exc:
@@ -166,55 +170,15 @@ def benchmarks() -> dict[str, BenchmarkEntry]:
                 except Exception as exc:
                     raise ValueError(f"{path}: benchmark {raw.get('id', '?')}: {exc}") from exc
                 found[info.id] = BenchmarkEntry(info, engine, spec, path)
-        arena_path = d / "arena.yaml"
-        if arena_path.exists():
-            for entry in _arena_entries(arena_path, known_boards):
-                found[entry.info.id] = entry
     return found
 
 
-ARENA_METRIC = "arena_score"
-
-
-def _arena_entries(path: Path, known_boards: set[str]) -> list[BenchmarkEntry]:
-    raw = _load_yaml(path)
-    out = []
-    for arena in raw["arenas"]:
-        for cat in arena["categories"]:
-            board = f"{arena['type']}/{cat['board']}"
-            if board not in known_boards:
-                raise ValueError(f"{path}: arena {arena['id']}/{cat['key']}: board {board!r} "
-                                 "is not in boards.yaml")
-            for style_control in (True, False):
-                bid = f"arena-{arena['id']}-{cat['board']}"
-                name = f"{arena['display_name']} · {cat['label']}"
-                if not style_control:
-                    bid += "-no-style-control"
-                    name += " (no style control)"
-                info = BenchmarkInfo(
-                    id=bid,
-                    display_name=name,
-                    category=cat["category"],
-                    description=arena["description"].strip(),
-                    url=arena["url"],
-                    language=cat.get("language", "multi"),
-                    primary_metric=ARENA_METRIC,
-                    higher_is_better=True,
-                    scale_max=None,
-                    board=board,
-                    style_control=style_control,
-                    cases_unit="votes",
-                )
-                spec = {
-                    "dataset": raw["dataset"],
-                    "subset": arena["subsets"]["style_control" if style_control else "raw"],
-                    "category_key": cat["key"],
-                    "arena": arena["id"],
-                    "license": raw.get("license"),
-                    "attribution": " ".join(str(raw.get("attribution", "")).split()),
-                }
-                out.append(BenchmarkEntry(info, "arena", spec, path))
-    return out
+def board_models() -> set[str]:
+    """The models the leaderboard shows: the catalog's, and only those (picked
+    2026-10-13). The catalog is the comparison set — our models and the 1–5B open models
+    chosen to measure them against — so an ad-hoc `openrouter:`/`vllm:` run is kept in
+    the store and in `/v1/runs`, but never ranked beside them."""
+    return set(models())
 
 
 def reload() -> None:
@@ -288,8 +252,7 @@ def resolve_benchmark(name: str) -> BenchmarkEntry:
 
 
 def select_benchmarks(spec: str) -> list[BenchmarkEntry]:
-    """Comma list of ids, `category:<name>`, `engine:<name>`, or `all`. `all` and
-    `category:` select runnable benchmarks only (Arena boards are imported, not run)."""
+    """Comma list of ids, `category:<name>`, `engine:<name>`, or `all`."""
     out: dict[str, BenchmarkEntry] = {}
     runnable = {k: b for k, b in benchmarks().items() if b.engine in RUNNABLE_ENGINES}
     for token in (t.strip() for t in spec.split(",")):

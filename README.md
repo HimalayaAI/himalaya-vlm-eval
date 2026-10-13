@@ -104,8 +104,7 @@ same command continues where it stopped**:
 |---|---|
 | `himeval eval <run_dir>` | re-score saved predictions (after a scorer change) |
 | `himeval publish <run_dir>` | publish a run evaluated earlier or elsewhere |
-| `himeval import results.json` | publish numbers from another leaderboard (`--format-help`) |
-| `himeval import-arena` | import Arena's Vision and Document boards (official dataset) |
+| `himeval import results.json` | store numbers from another leaderboard (`--format-help`); kept for reference, never ranked |
 | `himeval meta refresh` | refresh prices and context lengths (OpenRouter + overrides) |
 | `himeval leaderboard <bench>` | print a board from the store |
 | `himeval serve` | the results API |
@@ -121,7 +120,6 @@ same command continues where it stopped**:
 | Chat | | MM-Vet, LLaVA-Bench |
 | General | | MMMU, MMBench v1.1, MMStar, RealWorldQA, BLINK, MME |
 | Hallucination | | HallusionBench, POPE |
-| Arena (imported) | | Vision Arena × 10 categories, Document Arena — style control on/off |
 
 **Native benchmarks** are YAML (`src/himalaya_vlm_eval/catalog/benchmarks/`). A new OCR or
 short-answer VQA set is a file, no code:
@@ -151,48 +149,54 @@ tables (TEDS on the generator's cell grid) and layout (role F1 at IoU 0.5). See
 **VLMEvalKit benchmarks** run through a VLMEvalKit checkout so scores match the
 OpenCompass leaderboard's method. Setup and the judge model: [docs/VLMEVALKIT.md](docs/VLMEVALKIT.md).
 
-## Arena boards (imported)
+## What the board shows
 
-Arena (arena.ai) has already ranked most frontier VLMs by human votes, so those boards are
-imported rather than re-run:
+**Only results this harness measured, of models in the catalog** (picked 2026-10-13).
+Leaderboards worth trusting run the benchmarks themselves, so the results API ranks
+`source.kind == "measured"` runs of `catalog.board_models()` and nothing else. An imported
+number (`himeval import`) or an ad-hoc model (`openrouter:…`, `vllm:…`) stays in the store
+and in `/v1/runs`, and never takes a rank. The Arena import that filled the board's first
+categories until then was removed with this rule.
 
-```bash
-HIMEVAL_STORE=s3://himalaya-vlm-eval-results himeval import-arena   # latest snapshot, all boards
-himeval import-arena --arena vision --history                       # every published snapshot
-```
-
-- **Source:** the official dataset [`lmarena-ai/leaderboard-dataset`](https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset)
-  (CC BY 4.0), pinned to a commit per import. arena.ai itself is never read: its Terms of
-  Use forbid scraping and automated access.
-- **Boards:** Vision Arena's 10 categories and Document Arena, each with and without style
-  control (`catalog/arena.yaml` → `arena-vision-ocr`, `arena-vision-ocr-no-style-control`,
-  …). Scores are Bradley–Terry ratings with 95% CIs; `cases` are votes. A category missing
-  from the newest snapshot is retired on arena.ai and is skipped.
-- **Attribution:** every imported result carries the licence and credit line; show it
-  wherever an Arena board is shown.
-- Re-importing a snapshot is a no-op; a new snapshot adds results (newest wins on the board).
+The catalog is therefore the comparison set: HimalayaAI's models and the open models of
+the same size class they are measured against (`catalog/models/third_party.yaml`).
 
 ## Leaderboard layout and prices
 
 `catalog/boards.yaml` lays the boards out the way the studio shows them: two top-bar types,
-**Vision** and **Document**, each with a side list of categories. Arena's categories come first,
-then Nepali and the measured suites (Vision: … OCR · Nepali OCR · Chart · Math · Chat ·
-General · Hallucination; Document: Overall · Nepali Fields · Nepali Q&A · Nepali Page · Nepali
-Table · Nepali Layout · Document Q&A · Parsing). A benchmark goes on its category's default
+**Vision** and **Document**, each with a side list of categories, every one filled by suites
+run here (Vision: OCR · Nepali OCR · Chart · Math · Chat · General · Hallucination; Document:
+Nepali Fields · Nepali Q&A · Nepali Page · Nepali Table · Nepali Layout · Document Q&A ·
+Parsing). A benchmark goes on its category's default
 board unless its YAML says `board:`. Served by `GET /v1/boards`.
 
-Price ($ per 1M input/output tokens) and context length drive the board's filters and the
-Pareto chart. Results never carry them (prices change, results do not). `himeval meta refresh`
+Every model carries `params_b`, its total parameter count (Hugging Face's safetensors total,
+embeddings included), which the studio plots scores against. Price ($ per 1M input/output
+tokens) and context length drive the board's filters where a model has them; self-hosted
+models have no price. Results never carry them (prices change, results do not). `himeval meta refresh`
 writes `meta/models.json` from OpenRouter's public models API plus `catalog/model_meta.yaml`
 overrides, and the API joins it on at serve time. Unmatched models show N/A. Matching only crosses
 reasoning-effort suffixes and snapshot dates, because a wrong price is worse than none.
 
 ## Models
 
-Presets live in `src/himalaya_vlm_eval/catalog/models/`: Himalaya models on Tarka
-(`glm-ocr-nepali` via `/ocr`, `himalaya-gemma-4-*` via chat), GPT, Gemini, Claude, Qwen-VL,
-Llama 4, Mistral, GLM-4.5V via OpenRouter, and Tesseract, EasyOCR, PaddleOCR, Surya,
-TrOCR in-process. Anything else, ad hoc:
+Presets live in `src/himalaya_vlm_eval/catalog/models/`:
+
+| File | Models | Reached through |
+|---|---|---|
+| `himalaya.yaml` | `glm-ocr-nepali` (1.33B), `himalaya-gemma-4-*` (Gemma 4 E2B, 5.12B), `glm-ocr` as the base control | Tarka |
+| `third_party.yaml` | the 1–5B comparison set: Gemma 4 E2B (our base, untuned), Qwen3.5 2B and 4B, Ministral 3 3B, Gemma 3 4B | vLLM we run (`base_url_env: VLLM_BASE_URL`), or OpenRouter |
+| `ocr_engines.yaml` | Tesseract, EasyOCR, PaddleOCR, Surya, TrOCR | in-process |
+
+A self-hosted entry names its server through the environment, so one entry runs against
+whichever vLLM the runner started:
+
+```bash
+vllm serve Qwen/Qwen3.5-2B --port 8001 &
+VLLM_BASE_URL=http://localhost:8001/v1 himeval run --model qwen3.5-2b --bench nepalipixel
+```
+
+Anything else, ad hoc (stored, never ranked):
 
 | Spec | Endpoint |
 |---|---|
@@ -216,14 +220,9 @@ HIMEVAL_STORE=s3://himalaya-vlm-eval-results himeval serve --port 8000
 curl localhost:8000/v1/leaderboard/nepalipixel
 ```
 
-Rankings follow Arena: a model's rank is 1 + the number of models whose 95% CI is
-entirely better, so models that cannot be told apart share a rank; the *rank spread* runs
-from there to the worst rank the CIs allow. On the Vision/OCR board both match arena.ai's
-own numbers.
-
-Arena publishes new snapshots every week or so. `.github/workflows/arena-sync.yml` imports
-them weekly and refreshes prices once the repository has `HIMEVAL_STORE` and write
-credentials as secrets. Until then it skips, and `himeval import-arena` runs by hand.
+Rankings follow LMArena's convention: a model's rank is 1 + the number of models whose 95%
+CI is entirely better, so models that cannot be told apart share a rank; the *rank spread*
+runs from there to the worst rank the CIs allow.
 
 ## Development
 

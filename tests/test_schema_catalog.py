@@ -53,13 +53,10 @@ def test_score_100_and_subset():
 def test_builtin_catalog_loads_and_is_consistent():
     models = catalog.models()
     benches = catalog.benchmarks()
-    assert len(models) >= 30 and len(benches) >= 35
+    assert len(models) >= 15 and len(benches) >= 35
     for b in benches.values():
         if b.engine == "native":
             NativeBenchmark(b)  # validates metrics/scorer/prompt
-        elif b.engine == "arena":
-            assert b.info.scale_max is None and b.info.cases_unit == "votes"
-            assert b.spec["subset"] and b.spec["category_key"] and b.spec["license"]
         else:
             spec = b.spec["vlmeval"]
             assert spec["dataset"] and spec["files"] and spec["judge"] in {"none", "extract",
@@ -71,6 +68,26 @@ def test_builtin_catalog_loads_and_is_consistent():
             assert isinstance(m, OpenAICompatModel)
             assert "key" not in str(m.describe()).lower() or "api_key" not in m.describe()
     assert isinstance(models["glm-ocr-nepali"].build(), TarkaOCRModel)
+
+
+def test_the_comparison_set_is_open_models_in_our_size_class(monkeypatch):
+    """Picked 2026-10-13: the models we are ranked against are open models of 1–5B total
+    parameters, each with a measured size, because the chart's x-axis is size."""
+    ours = {"glm-ocr-nepali", "himalaya-gemma-4-bf16", "himalaya-gemma-4-q8",
+            "himalaya-gemma-4-q4"}
+    models = catalog.models()
+    for mid in ours:
+        assert models[mid].info.params_b, mid
+    vlms = [e for e in models.values()
+            if e.info.org != "HimalayaAI" and e.info.kind == "vlm"]
+    assert vlms
+    for e in vlms:
+        assert e.info.open_weights is True, e.info.id
+        assert e.info.params_b is not None and 1 <= e.info.params_b <= 5.5, e.info.id
+    assert models["gemma-4-e2b-it"].info.params_b == models["himalaya-gemma-4-bf16"].info.params_b
+    # a self-hosted entry is pointed at its server by the environment
+    monkeypatch.setenv("VLLM_BASE_URL", "http://gpu-box:8000/v1")
+    assert models["qwen3.5-2b"].build().base_url == "http://gpu-box:8000/v1"
 
 
 def test_categories_cover_the_requested_families():
@@ -94,9 +111,8 @@ def test_select_benchmarks():
     ids = {b.info.id for b in catalog.select_benchmarks("category:math,ocrbench")}
     assert "ocrbench" in ids and "mathvista-mini" in ids
     assert {b.info.id for b in catalog.select_benchmarks("NepaliPixel")} == {"nepalipixel"}
-    runnable = [b for b in catalog.benchmarks().values() if b.engine != "arena"]
-    assert len(catalog.select_benchmarks("all")) == len(runnable)  # Arena is imported only
-    assert all(b.engine == "arena" for b in catalog.select_benchmarks("engine:arena"))
+    assert len(catalog.select_benchmarks("all")) == len(catalog.benchmarks())
+    assert all(b.engine == "native" for b in catalog.select_benchmarks("engine:native"))
     with pytest.raises(KeyError):
         catalog.select_benchmarks("category:nope")
 
@@ -104,11 +120,11 @@ def test_select_benchmarks():
 def test_user_catalog_overrides_and_bad_entries(tmp_path, monkeypatch):
     (tmp_path / "models").mkdir()
     (tmp_path / "models" / "x.yaml").write_text(
-        "- id: gpt-4o\n  display_name: Overridden\n  adapter: openai_compat\n"
+        "- id: gemma-3-4b-it\n  display_name: Overridden\n  adapter: openai_compat\n"
         "  params: {model: m, base_url: http://x}\n")
     monkeypatch.setenv("HIMEVAL_CATALOG", str(tmp_path))
     catalog.reload()
-    assert catalog.models()["gpt-4o"].info.display_name == "Overridden"
+    assert catalog.models()["gemma-3-4b-it"].info.display_name == "Overridden"
     (tmp_path / "models" / "bad.yaml").write_text("- id: Bad\n  display_name: x\n  adapter: a\n")
     catalog.reload()
     with pytest.raises(ValueError, match=r"bad\.yaml"):
@@ -132,19 +148,16 @@ def test_every_benchmark_sits_on_a_board_of_the_layout():
     assert benches["nepalipixel-docs-kv"].info.board == "document/nepali-fields"
     assert benches["omnidocbench"].info.board == "document/parsing"
     assert benches["docvqa-val"].info.board == "document/doc-qa"  # category default
-    # Arena: every category in both variants, on its own board
-    sc = benches["arena-vision-ocr"].info
-    raw = benches["arena-vision-ocr-no-style-control"].info
-    assert sc.board == raw.board == "vision/ocr"
-    assert (sc.style_control, raw.style_control) == (True, False)
-    arena = [b for b in benches.values() if b.engine == "arena"]
-    assert len(arena) == 2 * (10 + 1)
+    # Every category is filled by a suite this harness runs (2026-10-13): one with nothing
+    # in it is a menu entry pointing at an empty page, which is why Arena's went.
+    assert {b.info.board for b in benches.values()} == boards
 
 
 def test_unbounded_rating_has_no_score_100():
-    info = catalog.benchmarks()["arena-vision-overall"].info
-    assert info.score_100(1300.0) is None and not info.bounded
-    assert catalog.benchmarks()["nepalipixel"].info.score_100(0.5) == 50.0
+    info = catalog.benchmarks()["nepalipixel"].info
+    assert info.score_100(0.5) == 50.0
+    rating = info.model_copy(update={"scale_max": None})
+    assert rating.score_100(1300.0) is None and not rating.bounded
 
 
 def test_board_outside_the_layout_is_refused(tmp_path, monkeypatch):
