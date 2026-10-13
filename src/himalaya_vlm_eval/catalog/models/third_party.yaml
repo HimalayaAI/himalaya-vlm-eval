@@ -12,9 +12,10 @@
 # (`base_url_env: VLLM_BASE_URL`, one model per server, e.g.
 # `vllm serve google/gemma-4-E2B-it`), since these small models have no public API.
 #
-# Indic models in the class are tracked as issues until their adapters exist: Sarvam Vision
-# (3B, API-only, asynchronous document jobs, `ne-IN`) and Bodhan IndicOCR (0.8B, open
-# weights, a layout + OCR pipeline, lists `ne` and `mai`).
+# Indic models: Bodhan IndicOCR (0.8B, open weights, a layout + OCR pipeline, lists `ne`
+# and `mai`) joins once its in-process adapter exists (#19), run on our own GPU. Sarvam
+# Vision (3B) was considered and left out on 2026-10-13: its weights are closed, and this is
+# a comparison with open models (#18).
 
 # --- the untuned base of himalaya-gemma-4 -----------------------------------------------
 # The row that shows what our training added.

@@ -74,7 +74,7 @@ def test_the_comparison_set_is_open_models_in_our_size_class(monkeypatch):
     """Picked 2026-10-13: the models we are ranked against are open models of 1–5B total
     parameters, each with a measured size, because the chart's x-axis is size."""
     ours = {"glm-ocr-nepali", "himalaya-gemma-4-bf16", "himalaya-gemma-4-q8",
-            "himalaya-gemma-4-q4"}
+            "himalaya-gemma-4-q4", "himalaya-bf16-scalabs"}
     models = catalog.models()
     for mid in ours:
         assert models[mid].info.params_b, mid
